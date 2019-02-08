@@ -1,0 +1,16 @@
+[Unit]
+Description=Celery Flower dashboard
+After=gwcelery-redis.service
+Requires=gwcelery-redis.service
+
+[Service]
+Type=simple
+Environment=CELERY_BROKER_URL=redis+socket://%t/gwcelery/redis.sock
+LogsDirectory=gwcelery
+ExecStart=/usr/bin/env gwcelery flower
+StandardError=file:%L/%P.log
+# On Linux, it seems that you have to send Flower SIGINT twice to stop it.
+TimeoutStopSec=1
+
+[Install]
+WantedBy=multi-user.target

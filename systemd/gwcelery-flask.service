@@ -1,0 +1,15 @@
+[Unit]
+Description=Celery Flask tools dashboard
+After=gwcelery-redis.service
+PartOf=gwcelery.service
+Requires=gwcelery-redis.service
+
+[Service]
+Type=simple
+Environment=CELERY_BROKER_URL=redis+socket://%t/gwcelery/redis.sock
+LogsDirectory=gwcelery
+ExecStart=/usr/bin/env gwcelery flask run --with-threads --no-reload
+StandardError=file:%L/%P.log
+
+[Install]
+WantedBy=multi-user.target

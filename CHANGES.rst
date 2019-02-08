@@ -28,6 +28,16 @@ Changelog
 -   Update to the latest version of GWPy and un-pin Matplotlib because GWPy
     now supports Matplotlib 3.1.
 
+-   Provide support for starting, stopping, and supervising GWCelery using
+    systemd, the service manager for Linux. Systemd is present on many Linux
+    systems including apparently all LDG cluster nodes and is responsible for
+    bootstrapping userspace and bringing up system services.
+
+    The main advantage of using systemd instead of the older htcondor technique
+    is that systemd can stop and restart the components of GWCelery in the
+    proper sequence to minimize downtime and reduce the chances of losing
+    in-flight tasks.
+
 0.6.0 (2019-05-20)
 ------------------
 

@@ -1,0 +1,22 @@
+[Unit]
+Description=Celery beat periodic scheduler
+After=gwcelery-redis.service
+Requires=gwcelery-redis.service
+
+[Service]
+Type=forking
+PIDFile=%t/%P.pid
+LogsDirectory=gwcelery
+RuntimeDirectory=gwcelery
+StateDirectory=gwcelery
+Environment=CELERY_BROKER_URL=redis+socket://%t/gwcelery/redis.sock
+ExecStart=/usr/bin/env \
+    gwcelery beat \
+    --pidfile %t/%P.pid \
+    --detach \
+    --logfile %L/%P.log \
+    --loglevel ERROR \
+    --schedule %S/%P
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+[Unit]
+Description=Redis message broker server
+
+[Service]
+Type=forking
+PIDFile=%t/%P.pid
+LogsDirectory=gwcelery
+RuntimeDirectory=gwcelery
+StateDirectory=gwcelery
+ExecStart=/usr/bin/env \
+    redis-server \
+    --pidfile %t/%P.pid \
+    --unixsocket %t/%P.sock \
+    --unixsocketperm 700 \
+    --client-output-buffer-limit normal 0 0 0 \
+    --client-output-buffer-limit replica 256mb 64mb 60 \
+    --client-output-buffer-limit pubsub 256mb 64mb 60 \
+    --port 0 \
+    --daemonize yes \
+    --dir %S/gwcelery \
+    --logfile %L/%P.log

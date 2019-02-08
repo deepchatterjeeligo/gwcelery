@@ -1,0 +1,39 @@
+[Unit]
+Description=GWCelery workers
+After=gwcelery-redis.service
+Requires=gwcelery-redis.service
+Wants=gwcelery-beat.service
+Wants=gwcelery-flask.service
+Wants=gwcelery-flower.service
+
+[Service]
+Type=forking
+LogsDirectory=gwcelery
+RuntimeDirectory=gwcelery
+Environment=CELERY_BROKER_URL=redis+socket://%t/gwcelery/redis.sock
+ExecStart=/usr/bin/env \
+    gwcelery multi start \
+    celery openmp exttrig superevent voevent \
+    --queues=%%n \
+    --concurrency:openmp,exttrig,superevent,voevent=1 \
+    --pool:voevent=solo \
+    --lvalert:celery \
+    --pidfile=%t/gwcelery/%%n.pid \
+    --logfile=%L/gwcelery/%%n.log \
+    --loglevel=INFO
+ExecStop=/usr/bin/env \
+    gwcelery multi stopwait \
+    celery openmp exttrig superevent \
+    --pidfile=%t/gwcelery/%%n.pid
+ExecReload=/usr/bin/env \
+    gwcelery multi restart \
+    celery openmp exttrig superevent voevent \
+    --queues=%%n \
+    --concurrency:openmp,exttrig,superevent,voevent=1 \
+    --pool:voevent=solo \
+    --pidfile=%t/gwcelery/%%n.pid \
+    --logfile=%L/gwcelery/%%n.log \
+    --loglevel=INFO
+
+[Install]
+WantedBy=multi-user.target
