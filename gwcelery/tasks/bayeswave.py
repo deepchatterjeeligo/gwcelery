@@ -52,7 +52,8 @@ def start_bayeswave(preferred_event_id, superevent_id):
     #setting up environment manually for BW
     pymajor = sys.version_info[0]
     pyminor = sys.version_info[1]
-    pypath_to_add = bw_prefix + "/lib/python" + str(pymajor) + "." + str(pyminor) + "/site-packages"
+    #pypath_to_add = bw_prefix + "/lib/python" + str(pymajor) + "." + str(pyminor) + "/site-packages"
+    pypath_to_add = bw_prefix + "/lib/python2.7/site-packages"
     print(pypath_to_add)
     sys.path.append(pypath_to_add)
     
