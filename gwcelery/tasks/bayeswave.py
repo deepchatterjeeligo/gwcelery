@@ -23,8 +23,9 @@ from . import gracedb
 
 
 ini_name = '/home/bence.becsy/O3/zero_lag/zero_lag.ini'
-pipepath = '/home/bence.becsy/O3/BW/bin/bayeswave_pipe'
-bw_user_env_file = '/home/bence.becsy/O3/BW/etc/bayeswave-user-env.sh'
+bw_prefix = '/home/bence.becsy/O3/BW'
+pipepath = bw_prefix + '/bin/bayeswave_pipe'
+bw_user_env_file = bw_prefix + '/etc/bayeswave-user-env.sh'
 
 
 @app.task(ignore_result=True, shared=False)
@@ -41,10 +42,16 @@ def start_bayeswave(preferred_event_id, superevent_id):
         The GraceDb ID of a target superevent
     """
     # make a run directory
+    #TODO: separating jobs based on ifo setting, which we ideally should read from graceDB
     workdir = '/home/bence.becsy/O3/zero_lag/jobs/'+preferred_event_id
     
     #make sure the environment is set for the run
     #os.system(bw_user_env_file)
+    
+    #setting up environment manually for BW
+    pymajor = sys.version_info[0]
+    pyminor = sys.version_info[1]
+    sys.path.append(bw_prefix + "/lib/python" + pymajor + "." + pyminor + "/site-packages")
     
     # -- Set up call to pipeline -- Niter=1000 for very quick tests
     pipe_call = '{pipepath} {inifile} \
