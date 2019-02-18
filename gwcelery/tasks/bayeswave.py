@@ -55,15 +55,14 @@ def start_bayeswave(preferred_event_id, superevent_id):
     #pypath_to_add = bw_prefix + "/lib/python" + str(pymajor) + "." + str(pyminor) + "/site-packages"
     pypath_to_add = bw_prefix + "/lib/python2.7/site-packages"
     print(pypath_to_add)
-    sys.path.append(pypath_to_add)
+    #sys.path.append(pypath_to_add)
     
     # -- Set up call to pipeline -- Niter=1000 for very quick tests
     #Added "python2.7" before the call to force it to use python 2.7
-    pipe_call = 'python2.7 -c \"import sys; sys.path.append(\'/home/bence.becsy/O3/BW/lib/python2.7/site-packages\')\" {pipepath} {inifile} \
+    pipe_call = 'export PYTHONPATH={extra_path}:${PYTHONPATH}; python2.7 {pipepath} {inifile} \
     --workdir {workdir} \
     --graceID {graceid} \
-    --Niter 1000 \
-    --condor-submit'.format(pipepath=pipepath, inifile=ini_name, workdir=workdir, graceid=preferred_event_id)
+    --condor-submit'.format(extra_path=pypath_to_add ,pipepath=pipepath, inifile=ini_name, workdir=workdir, graceid=preferred_event_id)
 
     print("Calling: " + pipe_call)
 
