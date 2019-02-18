@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import sys
 
 from celery import group
 from glue.lal import Cache
@@ -51,7 +52,9 @@ def start_bayeswave(preferred_event_id, superevent_id):
     #setting up environment manually for BW
     pymajor = sys.version_info[0]
     pyminor = sys.version_info[1]
-    sys.path.append(bw_prefix + "/lib/python" + pymajor + "." + pyminor + "/site-packages")
+    pypath_to_add = bw_prefix + "/lib/python" + pymajor + "." + pyminor + "/site-packages"
+    print(pypath_to_add)
+    sys.path.append(pypath_to_add)
     
     # -- Set up call to pipeline -- Niter=1000 for very quick tests
     pipe_call = '{pipepath} {inifile} \
