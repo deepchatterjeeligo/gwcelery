@@ -40,6 +40,6 @@ def start_bayeswave(ini_contents, preferred_event_id, superevent_id):
         The GraceDb ID of a target superevent
     """
     # make a run directory
-    workdir = '/home/bence.becsy/O3/zero_lag/jobs/'+graceid
+    workdir = '/home/bence.becsy/O3/zero_lag/jobs/'+preferred_event_id
 
     print(workdir)
