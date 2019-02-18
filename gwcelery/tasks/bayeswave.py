@@ -44,7 +44,7 @@ def start_bayeswave(preferred_event_id, superevent_id):
     workdir = '/home/bence.becsy/O3/zero_lag/jobs/'+preferred_event_id
     
     #make sure the environment is set for the run
-    os.system(bw_user_env_file)
+    #os.system(bw_user_env_file)
     
     # -- Set up call to pipeline -- Niter=1000 for very quick tests
     pipe_call = '{pipepath} {inifile} \
@@ -53,4 +53,7 @@ def start_bayeswave(preferred_event_id, superevent_id):
     --Niter 1000 \
     --condor-submit'.format(pipepath=pipepath, inifile=ini_name, workdir=workdir, graceid=preferred_event_id)
     
-    print(pipe_call)
+    print("Calling: " + pipe_call)
+    
+    # -- Call the pipeline!
+    os.system(pipe_call)
