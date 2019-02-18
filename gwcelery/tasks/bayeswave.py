@@ -58,13 +58,14 @@ def start_bayeswave(preferred_event_id, superevent_id):
     sys.path.append(pypath_to_add)
     
     # -- Set up call to pipeline -- Niter=1000 for very quick tests
-    pipe_call = '{pipepath} {inifile} \
+    #Added "python2.7" before the call to force it to use python 2.7
+    pipe_call = 'python2.7 {pipepath} {inifile} \
     --workdir {workdir} \
     --graceID {graceid} \
     --Niter 1000 \
     --condor-submit'.format(pipepath=pipepath, inifile=ini_name, workdir=workdir, graceid=preferred_event_id)
-    
+
     print("Calling: " + pipe_call)
-    
+
     # -- Call the pipeline!
     os.system(pipe_call)
