@@ -59,7 +59,7 @@ def start_bayeswave(preferred_event_id, superevent_id):
     
     # -- Set up call to pipeline -- Niter=1000 for very quick tests
     #Added "python2.7" before the call to force it to use python 2.7
-    pipe_call = 'python2.7 {pipepath} {inifile} \
+    pipe_call = 'python2.7 -c \"import sys; sys.path.append(\'/home/bence.becsy/O3/BW/lib/python2.7/site-packages\')\" {pipepath} {inifile} \
     --workdir {workdir} \
     --graceID {graceid} \
     --Niter 1000 \
