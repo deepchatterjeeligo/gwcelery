@@ -24,10 +24,11 @@ from . import gracedb
 
 ini_name = '/home/bence.becsy/O3/zero_lag/zero_lag.ini'
 pipepath = '/home/bence.becsy/O3/BW/bin/bayeswave_pipe'
+bw_user_env_file = '/home/bence.becsy/O3/BW/etc/bayeswave-user-env.sh'
 
 
 @app.task(ignore_result=True, shared=False)
-def start_bayeswave(ini_contents, preferred_event_id, superevent_id):
+def start_bayeswave(preferred_event_id, superevent_id):
     """Run BayesWave on a given event.
 
     Parameters
@@ -41,5 +42,15 @@ def start_bayeswave(ini_contents, preferred_event_id, superevent_id):
     """
     # make a run directory
     workdir = '/home/bence.becsy/O3/zero_lag/jobs/'+preferred_event_id
-
-    print(workdir)
+    
+    #make sure the environment is set for the run
+    os.system(bw_user_env_file)
+    
+    # -- Set up call to pipeline -- Niter=1000 for very quick tests
+    pipe_call = '{pipepath} {inifile} \
+    --workdir {workdir} \
+    --graceID {graceid} \
+    --Niter 1000 \
+    --condor-submit'.format(pipepath=pipepath, inifile=ini_name, workdir=workdir, graceid=preferred_event_id)
+    
+    print(pipe_call)
