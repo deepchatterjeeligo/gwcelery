@@ -24,9 +24,9 @@ from . import gracedb
 
 
 ini_name = '/home/bence.becsy/O3/zero_lag/zero_lag.ini'
-bw_prefix = '/home/bence.becsy/O3/BW'
-pipepath = bw_prefix + '/bin/bayeswave_pipe'
-bw_user_env_file = bw_prefix + '/etc/bayeswave-user-env.sh'
+#path to conda system-wide release of BayesWave
+bw_prefix = '/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py37/bin/'
+pipepath = '/home/bence.becsy/O3/BW/bin/bayeswave_pipe'
 
 
 @app.task(ignore_result=True, shared=False)
@@ -46,16 +46,8 @@ def start_bayeswave(preferred_event_id, superevent_id):
     #TODO: separating jobs based on ifo setting, which we ideally should read from graceDB
     workdir = '/home/bence.becsy/O3/zero_lag/jobs/'+preferred_event_id
     
-    #make sure the environment is set for the run
-    #os.system(bw_user_env_file)
-    
-    #setting up environment manually for BW
-    pymajor = sys.version_info[0]
-    pyminor = sys.version_info[1]
-    #pypath_to_add = bw_prefix + "/lib/python" + str(pymajor) + "." + str(pyminor) + "/site-packages"
-    pypath_to_add = bw_prefix + "/lib/python2.7/site-packages"
-    print(pypath_to_add)
-    #sys.path.append(pypath_to_add)
+    #path we need to add to PYTHONPATH for bayeswave_pipe to work
+    pypath_to_add = "/home/bence.becsy/O3/BW/lib/python2.7/site-packages"
     
     # -- Set up call to pipeline -- Niter=1000 for very quick tests
     #Added "python2.7" before the call to force it to use python 2.7
