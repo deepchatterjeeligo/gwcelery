@@ -56,6 +56,7 @@ def start_bayeswave(preferred_event_id, superevent_id):
     pipe_call = 'export PYTHONPATH={extra_path}:${{PYTHONPATH}}; python2.7 {pipepath} {inifile} \
     --workdir {workdir} \
     --graceID {graceid} \
+    --gdb-playground \
     --condor-submit'.format(extra_path=pypath_to_add ,pipepath=pipepath, inifile=ini_name, workdir=workdir, graceid=preferred_event_id)
 
     print("Calling: " + pipe_call)
