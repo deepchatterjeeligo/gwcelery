@@ -48,12 +48,12 @@ def start_bayeswave(preferred_event_id, superevent_id):
     workdir = '/home/bence.becsy/O3/zero_lag/jobs/'+preferred_event_id
     
     #path we need to add to PYTHONPATH for bayeswave_pipe to work
-    pypath_to_add = "/home/bence.becsy/O3/BW/lib/python2.7/site-packages"
+    #pypath_to_add = "/home/bence.becsy/O3/BW/lib/python2.7/site-packages"
+    pypath_to_add = "/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/lib/python2.7/site-packages"
     
     # -- Set up call to pipeline -- Niter=1000 for very quick tests
     #Added "python2.7" before the call to force it to use python 2.7
-    #pipe_call = 'export PYTHONPATH={extra_path}:${{PYTHONPATH}}; python2.7 {pipepath} {inifile} \
-    pipe_call = 'python2.7 {pipepath} {inifile} \
+    pipe_call = 'export PYTHONPATH={extra_path}:${{PYTHONPATH}}; python2.7 {pipepath} {inifile} \
     --workdir {workdir} \
     --graceID {graceid} \
     --condor-submit'.format(extra_path=pypath_to_add ,pipepath=pipepath, inifile=ini_name, workdir=workdir, graceid=preferred_event_id)
