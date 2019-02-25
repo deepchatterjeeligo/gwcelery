@@ -31,7 +31,7 @@ pipepath = '/home/bence.becsy/O3/BW/bin/bayeswave_pipe'
 #pipepath = bw_prefix + 'bayeswave_pipe'
 
 @app.task(ignore_result=True, shared=False)
-def start_bayeswave(preferred_event_id, superevent_id):
+def start_bayeswave(preferred_event_id, superevent_id, gdb_playground=False):
     """Run BayesWave on a given event.
 
     Parameters
@@ -53,11 +53,17 @@ def start_bayeswave(preferred_event_id, superevent_id):
     
     # -- Set up call to pipeline -- Niter=1000 for very quick tests
     #Added "python2.7" before the call to force it to use python 2.7
-    pipe_call = 'export PYTHONPATH={extra_path}:${{PYTHONPATH}}; python2.7 {pipepath} {inifile} \
-    --workdir {workdir} \
-    --graceID {graceid} \
-    --gdb-playground \
-    --condor-submit'.format(extra_path=pypath_to_add ,pipepath=pipepath, inifile=ini_name, workdir=workdir, graceid=preferred_event_id)
+    if gdb_playground:
+        pipe_call = 'export PYTHONPATH={extra_path}:${{PYTHONPATH}}; python2.7 {pipepath} {inifile} \
+        --workdir {workdir} \
+        --graceID {graceid} \
+        --gdb-playground \
+        --condor-submit'.format(extra_path=pypath_to_add ,pipepath=pipepath, inifile=ini_name, workdir=workdir, graceid=preferred_event_id)
+    else:
+        pipe_call = 'export PYTHONPATH={extra_path}:${{PYTHONPATH}}; python2.7 {pipepath} {inifile} \
+        --workdir {workdir} \
+        --graceID {graceid} \
+        --condor-submit'.format(extra_path=pypath_to_add ,pipepath=pipepath, inifile=ini_name, workdir=workdir, graceid=preferred_event_id)
 
     print("Calling: " + pipe_call)
 
