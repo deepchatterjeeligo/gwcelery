@@ -27,8 +27,8 @@ ini_name = '/home/bence.becsy/O3/zero_lag/zero_lag.ini'
 #path to conda system-wide release of BayesWave
 #bw_prefix = '/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py37/bin/'
 bw_prefix = '/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/bin/'
-#pipepath = '/home/bence.becsy/O3/BW/bin/bayeswave_pipe'
-pipepath = bw_prefix + 'bayeswave_pipe'
+pipepath = '/home/bence.becsy/O3/BW/bin/bayeswave_pipe'
+#pipepath = bw_prefix + 'bayeswave_pipe'
 
 @app.task(ignore_result=True, shared=False)
 def start_bayeswave(preferred_event_id, superevent_id):
@@ -48,8 +48,8 @@ def start_bayeswave(preferred_event_id, superevent_id):
     workdir = '/home/bence.becsy/O3/zero_lag/jobs/'+preferred_event_id
     
     #path we need to add to PYTHONPATH for bayeswave_pipe to work
-    #pypath_to_add = "/home/bence.becsy/O3/BW/lib/python2.7/site-packages"
-    pypath_to_add = "/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/lib/python2.7/site-packages"
+    pypath_to_add = "/home/bence.becsy/O3/BW/lib/python2.7/site-packages"
+    #pypath_to_add = "/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/lib/python2.7/site-packages"
     
     # -- Set up call to pipeline -- Niter=1000 for very quick tests
     #Added "python2.7" before the call to force it to use python 2.7
