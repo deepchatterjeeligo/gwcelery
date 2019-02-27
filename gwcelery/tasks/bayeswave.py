@@ -32,6 +32,23 @@ def prepare_ini(preferred_event_id, superevent_id=None):
     ini_file = os.getenv('HOME') + '/public_html/O3/BayesWave/bayes_wave_zero_lag_{0}.ini'.format(preferred_event_id)
     template = """[input]
 dataseed=1234
+
+; variable srate (use min-srate for trigger<frequency-threshold; max-srate for
+; trigger>frequency-threshold)
+frequency-threshold=200
+min_srate=4096
+max_srate=4096
+max-seglen=2
+min-seglen=2
+;if no trigger frequency is found, this value is used:
+flow=16.0
+; threshold for setting flow (and srate, window length and seglen):
+frequency_threshold = 200.0
+; if trigger_frequency < 200.0: flow = min_flow
+min_flow=16.0
+; else: flow = max_flow
+max_flow = 64.0
+
 PSDlength=64.0
 padding=0.0
 ifo-list={0}
