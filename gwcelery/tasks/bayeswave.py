@@ -51,19 +51,20 @@ def start_bayeswave(preferred_event_id, superevent_id, gdb_playground=False):
     pypath_to_add = "/home/bence.becsy/O3/BW/lib/python2.7/site-packages"
     #pypath_to_add = "/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/lib/python2.7/site-packages"
     
-    # -- Set up call to pipeline -- Niter=1000 for very quick tests
+    # -- Set up call to pipeline -- 
     #Added "python2.7" before the call to force it to use python 2.7
     if gdb_playground:
-        pipe_call = 'export PYTHONPATH={extra_path}:${{PYTHONPATH}}; python2.7 {pipepath} {inifile} \
+        pipe_call = 'conda; export PYTHONPATH={extra_path}:${{PYTHONPATH}}; python2.7 {pipepath} {inifile} \
         --workdir {workdir} \
         --graceID {graceid} \
         --gdb-playground \
         --condor-submit'.format(extra_path=pypath_to_add ,pipepath=pipepath, inifile=ini_name, workdir=workdir, graceid=preferred_event_id)
     else:
+        #test for O2 replay data -- needs trigger time
         pipe_call = 'export PYTHONPATH={extra_path}:${{PYTHONPATH}}; python2.7 {pipepath} {inifile} \
         --workdir {workdir} \
-        --graceID {graceid} \
-        --condor-submit'.format(extra_path=pypath_to_add ,pipepath=pipepath, inifile=ini_name, workdir=workdir, graceid=preferred_event_id)
+        --trigger-time 1187051080.46 \
+        --condor-submit'.format(extra_path=pypath_to_add ,pipepath=pipepath, inifile=ini_name, workdir=workdir)
 
     print("Calling: " + pipe_call)
 
