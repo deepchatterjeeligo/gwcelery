@@ -17,6 +17,8 @@ from gwpy.timeseries import StateVector
 import lal
 import lalsimulation
 
+import numpy as np
+
 from .. import app
 from ..jinja import env
 from . import condor
@@ -233,7 +235,128 @@ def job_error_notification(request, exc, traceback, superevent_id):
             message='Job failed', tags='pe'
         )
 
+@app.task(ignore_result=True, shared=False)
+def clean_up(workdir):
+    """Clean up a run directory.
 
+    Parameters
+    ----------
+    rundir : str
+        The path to a run directory where the DAG file exits
+    """
+    #shutil.rmtree(rundir)
+    subprocess.run("cp -r " + workdir + " /home/bence.becsy/public_html/O3/zero_lag/jobs/", shell=True)
+
+@app.task(ignore_result=True, shared=False)
+def upload_result(workdir, preferred_event_id):
+    """Upload a PE result
+
+    Parameters
+    ----------
+    graceid : str
+        The GraceDb ID.
+    """
+    webpage_dir = glob.glob("/home/bence.becsy/public_html/O3/zero_lag/jobs/" + preferred_event_id+ "/trigtime*/")[0]
+    rundir = glob.glob(workdir + '/trigtime*/')[0]
+    
+    event_info = gracedb.get_event(preferred_event_id)
+    IFO = event_info['extra_attributes']['MultiBurst']['ifos'].split(',')
+
+    freq = []
+    bandwidth = []
+    duration = []
+
+    dur_low = [0 for ifo in IFO]
+    dur_high = [0 for ifo in IFO]
+    dur_c = [0 for ifo in IFO]
+
+    # Get frequency, bandwidth, duration info (duration on logscale)
+    for ifo in range(len(IFO)):
+       data = np.genfromtxt(rundir + 'tables/signal_mode_{ifo}.txt'.format(ifo=IFO[ifo]))
+       freq.append(data[12])
+       bandwidth.append(data[14])
+       dur_low[ifo] = np.around(10**data[10,1],3)
+       dur_high[ifo] = np.around(10**data[10,2],3)
+       dur_c[ifo] = np.around(10**data[10,0],3)
+
+    freq = np.around(freq,2)
+    bandwidth = np.around(bandwidth,2)
+
+    #print freq
+    #print bandwidth
+    #print dur_low, dur_high, dur_c
+
+    # Get Bayes factor +error info
+    data = np.genfromtxt(rundir + 'evidence_stacked.dat')
+
+    BSG = data[2]-data[1]
+    BSN = data[2]-data[0]
+
+    err_SG = math.sqrt(data[5]+data[4])
+    err_SN = math.sqrt(data[5]+data[3])
+
+    err_SG = round(err_SG,2)
+    err_SN = round(err_SN,2)
+
+    print BSG, err_SG
+    print BSN, err_SN
+
+
+    # Format information to be sent to gracedb
+    gdbtable = '<table> \
+    <tr><th colspan=2>BW parameter estimation</th></tr> \
+    <tr><th>Median</th><th>90% CI lower bound</th>\
+    <tr><td>frequency (Hz)</td><td align=right>{freq}</td></tr> \
+    <tr><td>&nbsp;&nbsp;&nbsp;90% CI lower bound</td><td align=right>{freq}</td></tr> \
+    <tr><td>&nbsp;&nbsp;&nbsp;90% CI lower bound</td><td align=right>{freq}</td></tr> \
+    <tr><td>bandwidth (Hz)</td><td align=right>{bw}</td></tr> \
+    <tr><td>Duration (s)</td><td align=right>{dur}</td></tr> \
+    <tr><td>lnBSG</td><td align=right>{BSG}</td></tr> \
+    <tr><td>lnBSN</td><td align=right>{BSN}</td></tr> \
+    </table>'.format(freq=freq,bw=bandwidth,dur=duration,BSG=BSG,BSN=BSN)
+
+    paramtable = '<table> \
+    <tr><th colspan=4>BW parameter estimation</th></tr> \
+    <tr><th colspan=2>Param</th><th>Median</th><th>&nbsp;&nbsp;&nbsp;90%CI lower bound</th><th>&nbsp;&nbsp;&nbsp;90%CI upper bound</th></tr> \
+    <tr><td rowspan=2>frequency (Hz)</td><td>H1</td><td align=right>{freqH}</td><td align=right>{freqHlow}</td><td align=right>{freqHhigh}</td></tr> \
+    <tr><td>L1</td><td align=right>{freqL}</td><td align=right>{freqLlow}</td><td align=right>{freqLhigh}</td></tr> \
+    <tr><td rowspan=2>bandwidth (Hz)</td><td>H1</td><td align=right>{bwH}</td><td align=right>{bwHlow}</td><td align=right>{bwHhigh}</td></tr> \
+    <tr><td>L1</td><td align=right>{bwL}</td><td align=right>{bwLlow}</td><td align=right>{bwLhigh}</td></tr> \
+    <tr><td rowspan=2>duration (s)</td><td>H1</td><td align=right>{durH}</td><td align=right>{durHlow}</td><td align=right>{durHhigh}</td></tr> \
+    <tr><td>L1</td><td align=right>{durL}</td><td align=right>{durLlow}</td><td align=right>{durLhigh}</td></tr></table> \
+    '.format(freqH=freq[0][0],freqHlow=freq[0][1],freqHhigh=freq[0][2],freqL=freq[1][0],freqLlow=freq[1][1],freqLhigh=freq[1][2],bwH=bandwidth[0][0],bwHlow=bandwidth[0][1],bwHhigh=bandwidth[0][2],bwL=bandwidth[1][0],bwLlow=bandwidth[1][1],bwLhigh=bandwidth[1][2],durH=dur_c[0],durL=dur_c[1],durHlow=dur_low[0],durLlow=dur_low[1],durHhigh=dur_high[0],durLhigh=dur_high[1])
+
+    BFtable = '<table> \
+    <tr><th colspan=2>BW Bayes Factors</th></tr> \
+    <tr><td>lnBSG</td><td align=right>{BSG}+/-{errBSG}</td></tr> \
+    <tr><td>lnBSN</td><td align=right>{BSN}+/-{errBSN}</td></tr> \
+    </table>'.format(BSG=BSG,BSN=BSN,errBSG=err_SG,errBSN=err_SN)
+
+    #print(gdbtable)
+    #print(paramtable)
+    #print(BFtable)
+
+    # Sky map
+    skyname = glob.glob(rundir + 'skymap*.fits')[0]
+
+    os.system('cp {sky} {rundir}/BayesWave.fits'.format(sky=skyname, rundir=rundir)) # (change name so it's clear on GraceDB which skymap is ours)
+    os.system('gzip {rundir}/BayesWave.fits'.format(rundir=rundir))
+
+    #skytag = ["sky_loc","lvem"]
+    skytag = ["sky_loc"]
+    
+    #I have no idea what "contents" is --  let's just put an empty string in there for now
+    contents = ""
+    # Actually send info to gracedb
+    gracedb.upload(filecontents=contents, filename=rundir + 'BayesWave.fits.gz', graceid=preferred_event_id,
+                   message="BayesWave skymap FITS", tags = skytag)
+    gracedb.upload(filecontents=None, filename=None, graceid=preferred_event_id,
+                   message="<a href='https://ldas-jobs.ligo.caltech.edu/~bence.becsy/{0}'>BW Follow-up results</a>".format('/'.join(webpage_dir.split('/')[4:])), tags='pe')
+    gracedb.upload(filecontents=None, filename=None, graceid=preferred_event_id,
+                   message=paramtable, tags='pe')
+    gracedb.upload(filecontents=None, filename=None, graceid=preferred_event_id,
+                   message=BFtable, tags='pe')
+    
 def dag_finished(workdir, preferred_event_id, superevent_id):
     """Upload BayesWave PE results and clean up run directory
 
@@ -251,16 +374,17 @@ def dag_finished(workdir, preferred_event_id, superevent_id):
     tasks : canvas
         The work-flow for uploading PE results
     """
-    # get webdir where the results are outputted
-    webdir = workdir
 
     return group(
         gracedb.upload.si(
             filecontents=None, filename=None, graceid=superevent_id,
             message='BayesWave online parameter estimation finished.',
             tags='pe'
+        ),
+        upload_result.si(
+            workdir, preferred_event_id
         )
-    )
+    ) | clean_up.si(workdir)
 
 @app.task(ignore_result=True, shared=False)
 def start_bayeswave(preferred_event_id, superevent_id, gdb_playground=False):
