@@ -92,13 +92,43 @@ segment-url=https://segments.ligo.org
 
 [segments]
 {3}
-{4}
 """
+    from ligo.gracedb.rest import GraceDb
+    gracedb = GraceDb("https://gracedb-playground.ligo.org/api/")
+    event = gracedb.event(preferred_event_id)
+    event_info = event.json()
+    ifos = event_info['extra_attributes']['MultiBurst']['ifos'].split(',')
+    
+    #Hanford parameters
+    H1_frame = "'H1':'H1_HOFT_C02'"
+    H1_channel = "'H1':'H1:DCS-CALIB_STRAIN_C02'"
+    H1_analyze = "h1-analyze = H1:DMT-ANALYSIS_READY:1"
+    #Livingston parameters
+    L1_frame = "'L1':'L1_HOFT_C02'"
+    L1_channel = "'L1':'L1:DCS-CALIB_STRAIN_C02'"
+    L1_analyze = "l1-analyze = L1:DMT-ANALYSIS_READY:1"
+    #Virgo parameters
+    V1_frame = "'V1':'V1Online'"
+    V1_channel = "'V1':'V1:Hrec_hoft_16384Hz'"
+    V1_analyze = "v1-analyze = V1:ITF_SCIENCEMODE"
+    
+    ifo_list = "['"
+    ifo_list += "','".join(ifos)
+    ifo_list += "']"
+    
+    frame_dict = "{"
+    frame_dict += ",".join([frame_name for ifo, frame_name in zip(["H1", "L1", "V1"],[H1_frame, L1_frame, V1_frame]) if ifo in ifos])
+    frame_dict += "}"
+    
+    channel_dict = "{"
+    channel_dict += ",".join([channel_name for ifo, channel_name in zip(["H1", "L1", "V1"],[H1_channel, L1_channel, V1_channel]) if ifo in ifos])
+    channel_dict += "}"
+    
+    analyze_list = ""
+    analyze_list += "\n".join([analyze_name for ifo, analyze_name in zip(["H1", "L1", "V1"],[H1_analyze, L1_analyze, V1_analyze]) if ifo in ifos])
+    
     with open(ini_file, 'w') as i_f:
-        i_f.write(template.format("['H1','V1']", "{'H1':'H1_HOFT_C02','V1':'V1Online'}",
-                                 "{'H1':'H1:DCS-CALIB_STRAIN_C02','V1':'V1:Hrec_hoft_16384Hz'}",
-                                 "h1-analyze = H1:DMT-ANALYSIS_READY:1",
-                                 "v1-analyze = V1:ITF_SCIENCEMODE"))
+        i_f.write(template.format(ifo_list, frame_dict, channel_dict, analyze_list))
     return ini_file
     
 @app.task(ignore_result=True, shared=False)
