@@ -156,7 +156,112 @@ segment-url=https://segments.ligo.org
     with open(ini_file, 'w') as i_f:
         i_f.write(template.format(ifo_list, frame_dict, channel_dict, analyze_list))
     return ini_file
+
+@app.task(shared=False)
+def dag_prepare(workdir, ini_file, preferred_event_id, superevent_id):
+    """Create a Condor DAG to run BayesWave on a given event.
+
+    Parameters
+    ----------
+    workdir : str
+        The path to a work directory where the DAG file exits
+    ini_file : str
+        The path to the ini file
+    preferred_event_id : str
+        The GraceDb ID of a target preferred event
+    superevent_id : str
+        The GraceDb ID of a target superevent
+
+    Returns
+    -------
+    submit_file : str
+        The path to the .sub file
+    """
+
+    #gracedb.upload.delay(
+    gracedb.upload(
+        filecontents=None, filename=None, graceid=superevent_id,
+        message='"BayesWave launched"',
+        tags='pe'
+    )
     
+    try:
+        subprocess.run(pipe_call, shell=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                       check=True)
+        subprocess.run(['condor_submit_dag', '-no_submit',
+                        workdir + '/' + preferred_event_id + '.dag'],
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                       check=True)
+    except subprocess.CalledProcessError as e:
+        contents = b'args:\n' + json.dumps(e.args[1]).encode('utf-8') + \
+                   b'\n\nstdout:\n' + e.stdout + b'\n\nstderr:\n' + e.stderr
+        #gracedb.upload.delay(
+        gracedb.upload(
+            filecontents=contents, filename='pe_dag.log',
+            graceid=superevent_id,
+            message='Failed to prepare DAG', tags='pe'
+        )
+        raise
+
+    return workdir + '/' + preferred_event_id + '.dag.condor.sub'
+    
+
+@app.task(ignore_result=True, shared=False)
+def job_error_notification(request, exc, traceback, superevent_id):
+    """Upload notification when condor.submit terminates unexpectedly.
+
+    Parameters
+    ----------
+    request : Context (placeholder)
+        Task request variables
+    exc : Exception
+        Exception rased by condor.submit
+    traceback : str (placeholder)
+        Traceback message from a task
+    superevent_id : str
+        The GraceDb ID of a target superevent
+    """
+    if type(exc) is condor.JobAborted:
+        gracedb.upload.delay(
+            filecontents=None, filename=None, graceid=superevent_id,
+            message='Job was aborted.', tags='pe'
+        )
+    elif type(exc) is condor.JobFailed:
+        gracedb.upload.delay(
+            filecontents=None, filename=None, graceid=superevent_id,
+            message='Job failed', tags='pe'
+        )
+
+
+def dag_finished(workdir, preferred_event_id, superevent_id):
+    """Upload BayesWave PE results and clean up run directory
+
+    Parameters
+    ----------
+    rundir : str
+        The path to a run directory where the DAG file exits
+    preferred_event_id : str
+        The GraceDb ID of a target preferred event
+    superevent_id : str
+        The GraceDb ID of a target superevent
+
+    Returns
+    -------
+    tasks : canvas
+        The work-flow for uploading PE results
+    """
+    # get webdir where the results are outputted
+    webdir = workdir
+
+    return group(
+        gracedb.upload.si(
+            filecontents=None, filename=None, graceid=superevent_id,
+            message='BayesWave online parameter estimation finished.',
+            tags='pe'
+        )
+    )
+
 @app.task(ignore_result=True, shared=False)
 def start_bayeswave(preferred_event_id, superevent_id, gdb_playground=False):
     """Run BayesWave on a given event.
@@ -193,34 +298,11 @@ def start_bayeswave(preferred_event_id, superevent_id, gdb_playground=False):
         --workdir {workdir} \
         --trigger-time 1187051080.46'.format(extra_path=pypath_to_add ,pipepath=pipepath, inifile=ini_file, workdir=workdir)
 
-    #print("Calling: " + pipe_call)
-
-    #gracedb.upload.delay(
-    gracedb.upload(
-        filecontents=None, filename=None, graceid=superevent_id,
-        message='"BayesWave launched"',
-        tags='pe'
-    )
-    
-    # -- Call the pipeline!
-    #os.system(pipe_call)
-    try:
-        subprocess.run(pipe_call, shell=True,
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                       check=True)
-        subprocess.run(['condor_submit_dag', '-no_submit',
-                        workdir + '/' + preferred_event_id + '.dag'],
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                       check=True)
-    except subprocess.CalledProcessError as e:
-        contents = b'args:\n' + json.dumps(e.args[1]).encode('utf-8') + \
-                   b'\n\nstdout:\n' + e.stdout + b'\n\nstderr:\n' + e.stderr
-        #gracedb.upload.delay(
-        gracedb.upload(
-            filecontents=contents, filename='pe_dag.log',
-            graceid=superevent_id,
-            message='Failed to prepare DAG', tags='pe'
-        )
-        raise
-    
-    condor.submit.s(workdir + '/' + preferred_event_id + '.dag.condor.sub', log=workdir + '/' + preferred_event_id + '.condorsubmit.log').on_error(job_error_notification.s(superevent_id))
+        
+    (
+        dag_prepare.s(workdir, ini_file, preferred_event_id, superevent_id)
+        |
+        condor.submit.s().on_error(job_error_notification.s(superevent_id))
+        |
+        dag_finished(workdir, preferred_event_id, superevent_id)
+    ).delay()
