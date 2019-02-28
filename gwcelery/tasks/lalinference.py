@@ -308,7 +308,7 @@ def dag_prepare(rundir, ini_contents, preferred_event_id, superevent_id):
         subprocess.run(['lalinference_pipe', '--run-path', rundir,
                         '--gid', preferred_event_id, path_to_ini],
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                       check=True)
+                       check=True, shell=True)
         subprocess.run(['condor_submit_dag', '-no_submit',
                         rundir + '/multidag.dag'],
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
