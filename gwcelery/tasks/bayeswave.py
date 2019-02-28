@@ -223,4 +223,4 @@ def start_bayeswave(preferred_event_id, superevent_id, gdb_playground=False):
         )
         raise
     
-    condor.submit.s(workdir + '/' + preferred_event_id + '.dag.condor.sub').on_error(job_error_notification.s(superevent_id))
+    condor.submit.s(workdir + '/' + preferred_event_id + '.dag.condor.sub', log=workdir + '/' + preferred_event_id + '.condorsubmit.log').on_error(job_error_notification.s(superevent_id))
