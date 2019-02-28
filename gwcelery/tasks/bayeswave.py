@@ -205,7 +205,7 @@ def start_bayeswave(preferred_event_id, superevent_id, gdb_playground=False):
     # -- Call the pipeline!
     #os.system(pipe_call)
     try:
-        subprocess.run(pipe_call,
+        subprocess.run(pipe_call.split(),
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                        check=True)
         subprocess.run(['condor_submit_dag', '-no_submit',
