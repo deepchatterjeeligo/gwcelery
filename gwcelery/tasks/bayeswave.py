@@ -169,7 +169,8 @@ def start_bayeswave(preferred_event_id, superevent_id, gdb_playground=False):
 
     #print("Calling: " + pipe_call)
 
-    gracedb.upload.delay(
+    #gracedb.upload.delay(
+    gracedb.upload(
         filecontents=None, filename=None, graceid=superevent_id,
         message='"BayesWave launched"',
         tags='pe'
