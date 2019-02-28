@@ -93,10 +93,8 @@ segment-url=https://segments.ligo.org
 [segments]
 {3}
 """
-    from ligo.gracedb.rest import GraceDb
-    gracedb = GraceDb("https://gracedb-playground.ligo.org/api/")
-    event = gracedb.event(preferred_event_id)
-    event_info = event.json()
+
+    event_info = gracedb.get_event(preferred_event_id)
     ifos = event_info['extra_attributes']['MultiBurst']['ifos'].split(',')
     
     #Hanford parameters
@@ -151,8 +149,8 @@ def start_bayeswave(preferred_event_id, superevent_id, gdb_playground=False):
     ini_file = prepare_ini(preferred_event_id)
     
     #path we need to add to PYTHONPATH for bayeswave_pipe to work
-    #pypath_to_add = "/home/bence.becsy/O3/BW/lib/python2.7/site-packages"
-    pypath_to_add = "/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/lib/python2.7/site-packages/bayeswave_pipe:/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/lib/python2.7/site-packages/bayeswave_pipe_examples:/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/lib/python2.7/site-packages/bayeswave_plot:/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/lib/python2.7/site-packages/bayeswave_plot_data"
+    pypath_to_add = "/home/bence.becsy/O3/BW/lib/python2.7/site-packages"
+    #pypath_to_add = "/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/lib/python2.7/site-packages/bayeswave_pipe:/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/lib/python2.7/site-packages/bayeswave_pipe_examples:/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/lib/python2.7/site-packages/bayeswave_plot:/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/lib/python2.7/site-packages/bayeswave_plot_data"
     
     # -- Set up call to pipeline -- 
     #Added "python2.7" before the call to force it to use python 2.7
@@ -169,7 +167,13 @@ def start_bayeswave(preferred_event_id, superevent_id, gdb_playground=False):
         --trigger-time 1187051080.46 \
         --condor-submit'.format(extra_path=pypath_to_add ,pipepath=pipepath, inifile=ini_file, workdir=workdir)
 
-    print("Calling: " + pipe_call)
+    #print("Calling: " + pipe_call)
 
+    gracedb.upload.delay(
+        filecontents=None, filename=None, graceid=superevent_id,
+        message='"BayesWave launched"',
+        tags='pe'
+    )
+    
     # -- Call the pipeline!
     os.system(pipe_call)
