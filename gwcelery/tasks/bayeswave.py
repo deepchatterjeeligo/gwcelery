@@ -61,71 +61,8 @@ def prepare_ini(preferred_event_id, superevent_id=None):
     """Determine an appropriate PE settings for the target event and return ini
     file content
     """
-    ini_file = os.getenv('HOME') + '/public_html/O3/BayesWave/bayes_wave_zero_lag_{0}.ini'.format(preferred_event_id)
-    template = """[input]
-dataseed=1234
-
-; variable srate (use min-srate for trigger<frequency-threshold; max-srate for
-; trigger>frequency-threshold)
-frequency-threshold=200
-min_srate=4096
-max_srate=4096
-max-seglen=2
-min-seglen=2
-;if no trigger frequency is found, this value is used:
-flow=16.0
-; threshold for setting flow (and srate, window length and seglen):
-frequency_threshold = 200.0
-; if trigger_frequency < 200.0: flow = min_flow
-min_flow=16.0
-; else: flow = max_flow
-max_flow = 64.0
-
-PSDlength=64.0
-padding=0.0
-ifo-list={0}
-
-[engine]
-bayeswave=/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/bin/BayesWave
-bayeswave_post=/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/bin/BayesWavePost
-megaplot=/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/bin/megaplot.py
-megasky=/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/bin/megasky.py
-
-[datafind]
-frtype-list={1}
-channel-list={2}
-url-type=file
-veto-categories=[1]
-
-[bayeswave_options]
-bayesLine=
-updateGeocenterPSD=
-waveletPrior=
-Dmax=100
-#quick runs for gwcelery testing -- TODO: REMOVE THIS FOR PRODUCTION
-Niter=500
-
-[bayeswave_post_options]
-0noise=
-bayesLine=
-
-[condor]
-universe=vanilla
-checkpoint=
-bayeswave-request-memory=300
-bayeswave_post-request-memory=2000
-datafind=/usr/bin/gw_data_find
-ligolw_print=/usr/bin/ligolw_print
-segfind=/usr/bin/ligolw_segment_query_dqsegdb
-accounting_group = ligo.prod.o3.burst.paramest.bayeswave
-
-[segfind]
-segment-url=https://segments.ligo.org
-
-[segments]
-{3}
-"""
-
+    ini_template = env.get_template('bayeswave.jinja2')
+    
     event_info = gracedb.get_event(preferred_event_id)
     ifos = event_info['extra_attributes']['MultiBurst']['ifos'].split(',')
     
@@ -157,10 +94,17 @@ segment-url=https://segments.ligo.org
     analyze_list = ""
     analyze_list += "\n".join([analyze_name for ifo, analyze_name in zip(["H1", "L1", "V1"],[H1_analyze, L1_analyze, V1_analyze]) if ifo in ifos])
     
-    with open(ini_file, 'w') as i_f:
-        i_f.write(template.format(ifo_list, frame_dict, channel_dict, analyze_list))
-    return ini_file
-
+    ini_settings = {
+        'ifos': ifo_list,
+        'frames': frame_dict,
+        'channels': channel_dict,
+        'analyze-list': analyze_list
+    }
+    #print it out for testing
+    print(ini_template.render(ini_settings))
+    
+    return ini_template.render(ini_settings)
+    
 
 @app.task(shared=False)
 def dag_prepare(workdir, ini_file, preferred_event_id, superevent_id):
