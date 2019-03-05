@@ -26,6 +26,7 @@ from . import gracedb
 
 pipepath = '/home/bence.becsy/O3/BW/bin/bayeswave_pipe'
 
+
 @app.task(ignore_result=True, shared=False)
 def job_error_notification(request, exc, traceback, superevent_id):
     """Upload notification when condor.submit terminates unexpectedly.
@@ -53,6 +54,7 @@ def job_error_notification(request, exc, traceback, superevent_id):
             filecontents=None, filename=None, graceid=superevent_id,
             message='Job failed', tags='pe'
         )
+
 
 @app.task(shared=False)
 def prepare_ini(preferred_event_id, superevent_id=None):
@@ -159,6 +161,7 @@ segment-url=https://segments.ligo.org
         i_f.write(template.format(ifo_list, frame_dict, channel_dict, analyze_list))
     return ini_file
 
+
 @app.task(shared=False)
 def dag_prepare(workdir, ini_file, preferred_event_id, superevent_id):
     """Create a Condor DAG to run BayesWave on a given event.
@@ -235,6 +238,7 @@ def job_error_notification(request, exc, traceback, superevent_id):
             message='Job failed', tags='pe'
         )
 
+
 @app.task(ignore_result=True, shared=False)
 def clean_up(workdir):
     """Clean up a run directory.
@@ -246,6 +250,7 @@ def clean_up(workdir):
     """
     #shutil.rmtree(rundir)
     subprocess.run("cp -r " + workdir + " /home/bence.becsy/public_html/O3/zero_lag/jobs/", shell=True)
+
 
 @app.task(ignore_result=True, shared=False)
 def upload_result(workdir, preferred_event_id):
@@ -348,7 +353,8 @@ def upload_result(workdir, preferred_event_id):
                    message=paramtable, tags='pe')
     gracedb.upload(filecontents=None, filename=None, graceid=preferred_event_id,
                    message=BFtable, tags='pe')
-    
+
+
 def dag_finished(workdir, preferred_event_id, superevent_id):
     """Upload BayesWave PE results and clean up run directory
 
@@ -377,6 +383,7 @@ def dag_finished(workdir, preferred_event_id, superevent_id):
             workdir, preferred_event_id
         )
     ) | clean_up.si(workdir)
+
 
 @app.task(ignore_result=True, shared=False)
 def start_bayeswave(preferred_event_id, superevent_id, gdb_playground=False):
