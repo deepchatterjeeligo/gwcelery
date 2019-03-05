@@ -95,18 +95,15 @@ def prepare_ini(preferred_event_id, superevent_id=None):
     analyze_list += "\n".join([analyze_name for ifo, analyze_name in zip(["H1", "L1", "V1"],[H1_analyze, L1_analyze, V1_analyze]) if ifo in ifos])
     
     ini_settings = {
-        'ifos': ifo_list.decode('utf-8'),
-        'frames': frame_dict.decode('utf-8'),
-        'channels': channel_dict.decode('utf-8'),
-        'analyzelist': analyze_list.decode('utf-8')
+        'ifos': ifo_list,
+        'frames': frame_dict,
+        'channels': channel_dict,
+        'analyzelist': analyze_list
     }
-    
-    ini_contents = ini_template.render(ini_settings)
-    
     #print it out for testing
-    print(ini_contents.encode('utf-8'))
+    print(ini_template.render(ini_settings))
     
-    return ini_contents.encode('utf-8')
+    return ini_template.render(ini_settings)
     
 
 @app.task(shared=False)

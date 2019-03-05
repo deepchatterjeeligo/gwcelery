@@ -22,7 +22,7 @@ max_flow = 64.0
 
 PSDlength=64.0
 padding=0.0
-ifo-list={{ifos}}
+ifo-list={{ifos|safe}}
 
 [engine]
 bayeswave=/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/bin/BayesWave
@@ -31,8 +31,8 @@ megaplot=/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/li
 megasky=/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/bin/megasky.py
 
 [datafind]
-frtype-list={{frames}}
-channel-list={{channels}}
+frtype-list={{frames|safe}}
+channel-list={{channels|safe}}
 url-type=file
 veto-categories=[1]
 
