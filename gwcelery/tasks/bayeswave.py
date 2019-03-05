@@ -98,7 +98,7 @@ def prepare_ini(preferred_event_id, superevent_id=None):
         'ifos': ifo_list,
         'frames': frame_dict,
         'channels': channel_dict,
-        'analyze-list': analyze_list
+        'analyzelist': analyze_list
     }
     #print it out for testing
     print(ini_template.render(ini_settings))
