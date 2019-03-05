@@ -282,10 +282,6 @@ def upload_result(workdir, preferred_event_id):
     freq = np.around(freq,2)
     bandwidth = np.around(bandwidth,2)
 
-    #print freq
-    #print bandwidth
-    #print dur_low, dur_high, dur_c
-
     # Get Bayes factor +error info
     data = np.genfromtxt(rundir + 'evidence_stacked.dat')
 
@@ -297,10 +293,6 @@ def upload_result(workdir, preferred_event_id):
 
     err_SG = round(err_SG,2)
     err_SN = round(err_SN,2)
-
-    print BSG, err_SG
-    print BSN, err_SN
-
 
     # Format information to be sent to gracedb
     gdbtable = '<table> \
