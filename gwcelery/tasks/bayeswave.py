@@ -67,32 +67,32 @@ def prepare_ini(preferred_event_id, superevent_id=None):
     ifos = event_info['extra_attributes']['MultiBurst']['ifos'].split(',')
     
     #Hanford parameters
-    H1_frame = "'H1':'H1_HOFT_C02'"
-    H1_channel = "'H1':'H1:DCS-CALIB_STRAIN_C02'"
-    H1_analyze = "h1-analyze = H1:DMT-ANALYSIS_READY:1"
+    H1_frame = u"'H1':'H1_HOFT_C02'"
+    H1_channel = u"'H1':'H1:DCS-CALIB_STRAIN_C02'"
+    H1_analyze = u"h1-analyze = H1:DMT-ANALYSIS_READY:1"
     #Livingston parameters
-    L1_frame = "'L1':'L1_HOFT_C02'"
-    L1_channel = "'L1':'L1:DCS-CALIB_STRAIN_C02'"
-    L1_analyze = "l1-analyze = L1:DMT-ANALYSIS_READY:1"
+    L1_frame = u"'L1':'L1_HOFT_C02'"
+    L1_channel = u"'L1':'L1:DCS-CALIB_STRAIN_C02'"
+    L1_analyze = u"l1-analyze = L1:DMT-ANALYSIS_READY:1"
     #Virgo parameters
-    V1_frame = "'V1':'V1Online'"
-    V1_channel = "'V1':'V1:Hrec_hoft_16384Hz'"
-    V1_analyze = "v1-analyze = V1:ITF_SCIENCEMODE"
+    V1_frame = u"'V1':'V1Online'"
+    V1_channel = u"'V1':'V1:Hrec_hoft_16384Hz'"
+    V1_analyze = u"v1-analyze = V1:ITF_SCIENCEMODE"
     
-    ifo_list = "['"
-    ifo_list += "','".join(ifos)
-    ifo_list += "']"
+    ifo_list = u"['"
+    ifo_list += u"','".join(ifos)
+    ifo_list += u"']"
     
-    frame_dict = "{"
-    frame_dict += ",".join([frame_name for ifo, frame_name in zip(["H1", "L1", "V1"],[H1_frame, L1_frame, V1_frame]) if ifo in ifos])
-    frame_dict += "}"
+    frame_dict = u"{"
+    frame_dict += u",".join([frame_name for ifo, frame_name in zip(["H1", "L1", "V1"],[H1_frame, L1_frame, V1_frame]) if ifo in ifos])
+    frame_dict += u"}"
     
-    channel_dict = "{"
-    channel_dict += ",".join([channel_name for ifo, channel_name in zip(["H1", "L1", "V1"],[H1_channel, L1_channel, V1_channel]) if ifo in ifos])
-    channel_dict += "}"
+    channel_dict = u"{"
+    channel_dict += u",".join([channel_name for ifo, channel_name in zip(["H1", "L1", "V1"],[H1_channel, L1_channel, V1_channel]) if ifo in ifos])
+    channel_dict += u"}"
     
-    analyze_list = ""
-    analyze_list += "\n".join([analyze_name for ifo, analyze_name in zip(["H1", "L1", "V1"],[H1_analyze, L1_analyze, V1_analyze]) if ifo in ifos])
+    analyze_list = u""
+    analyze_list += u"\n".join([analyze_name for ifo, analyze_name in zip(["H1", "L1", "V1"],[H1_analyze, L1_analyze, V1_analyze]) if ifo in ifos])
     
     ini_settings = {
         'ifos': ifo_list,
