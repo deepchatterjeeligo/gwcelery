@@ -396,9 +396,9 @@ def job_error_notification(request, exc, traceback, superevent_id, rundir):
 
 
 @app.task(ignore_result=True, shared=False)
-def _upload_url(pe_results_path, graceid):
-    """Upload url of a page containing all of the plots."""
-    path_to_posplots, = _find_paths_from_name(pe_results_path, 'posplots.html')
+def _generate_and_upload_url(pe_results_path, graceid):
+    """Generate the summary pages using PESummary."""
+    path_to_posplots, = _find_paths_from_name(pe_results_path, 'home.html')
     baseurl = urllib.parse.urljoin(
                   app.conf['pe_results_url'],
                   os.path.relpath(
@@ -406,13 +406,89 @@ def _upload_url(pe_results_path, graceid):
                       app.conf['pe_results_path']
                   )
               )
+    webdir = os.path.join(pe_results_path, event['graceid'],
+                          "pesummary")
+    samples, = _find_paths_from_name(pe_results_path, "posterior_samples.dat")
+    psd, = _find_paths_from_name(os.path.join(pe_results_path, "psd"), "*.dat")
+
     gracedb.upload.delay(
-        filecontents=None, filename=None, graceid=graceid,
-        message=('LALInference online parameter estimation finished.'
-                 '<a href={}>results</a>').format(baseurl),
-        tags='pe'
+        filecontents=None, filename=None, graceid=superevent_id,
+        message='Starting to generate summary pages with PESummary',
+        tages='pe'
     )
 
+    arguments = ["summarypages.py",
+                 "--webdir", webdir,
+                 "--baseurl", baseurl,
+                 "--samples", samples]
+    psd = ["--psd"] + psd
+    arguments += psd
+
+    subprocess.run(arguments)
+
+    path, = _find_paths_from_name(pe_results+path, "home.html")
+    if os.path.isfile(path):
+        gracedb.upload.delay(
+            filecontents=None, filename=None, graceid=graceid,
+            message=('LALInference online parameter estimation finished. '
+                     'Results can be viewed <a href={}>here</a>').format(
+                         baseurl), tags='pe'
+        )
+    else:
+        gracedb.upload.delay(
+            filecontents=None, filename=None, graceid=graceid,
+            message=('Failed to generate summary pages'), tags='pe'
+        )
+
+
+@app.task(shared=False)                                                         
+def dag_prepare(rundir, ini_contents, preferred_event_id, superevent_id):       
+    """Create a Condor DAG to run LALInference on a given event.                
+                                                                                
+    Parameters                                                                  
+    ----------                                                                  
+    rundir : str                                                                
+        The path to a run directory where the DAG file exits                    
+    ini_contents : str                                                          
+        The content of online_pe.ini                                            
+    preferred_event_id : str                                                    
+        The GraceDb ID of a target preferred event                              
+    superevent_id : str                                                         
+        The GraceDb ID of a target superevent                                   
+                                                                                
+    Returns                                                                     
+    -------                                                                     
+    submit_file : str                                                           
+        The path to the .sub file                                               
+    """                                                                         
+    # write down .ini file in the run directory                                 
+    path_to_ini = rundir + '/' + ini_name                                       
+    with open(path_to_ini, 'w') as f:                                           
+        f.write(ini_contents)                                                   
+                                                                                
+    # run lalinference_pipe                                                     
+    gracedb.upload.delay(                                                       
+        filecontents=None, filename=None, graceid=superevent_id,                
+        message='starting LALInference online parameter estimation',            
+        tags='pe'                                                               
+    )                                                                           
+    try:                                                                        
+        subprocess.run(['lalinference_pipe', '--run-path', rundir,              
+                        '--gid', preferred_event_id, path_to_ini],              
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,          
+                       check=True)                                              
+        subprocess.run(['condor_submit_dag', '-no_submit',                      
+                        rundir + '/multidag.dag'],                              
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,          
+                       check=True)                                              
+    except subprocess.CalledProcessError as e:                                  
+        contents = b'args:\n' + json.dumps(e.args[1]).encode('utf-8') + \       
+                   b'\n\nstdout:\n' + e.stdout + b'\n\nstderr:\n' + e.stderr    
+        gracedb.upload.delay(                                                   
+            filecontents=contents, filename='pe_dag.log',                       
+            graceid=superevent_id,                                              
+            message='Failed to prepare DAG', tags='pe'                          
+        )
 
 @app.task(ignore_result=True, shared=False)
 def _get_result_contents(pe_results_path, filename):
@@ -476,10 +552,16 @@ def dag_finished(rundir, preferred_event_id, superevent_id):
     pe_results_path = \
         os.path.join(app.conf['pe_results_path'], preferred_event_id)
 
+    os.makedirs(os.path.join(pe_results_path, "psd")) 
+
+    psd_files = [i for i in _find_paths_from_name(rundir, "data-dump*-PSD.dat")]
+    for i in psd_files:
+        shutil.copy(psd_path, os.path.join(pe_results_path, "psd"))
+
     # FIXME: _upload_url.si has to be out of group for gracedb.create_label.si
     # to run
     return \
-        _upload_url.si(pe_results_path, superevent_id) | \
+        _generate_and_upload_url.si(rundir, pe_results_path, superevent_id) | \
         group(
             _upload_skymap(pe_results_path, superevent_id),
             _upload_result(
