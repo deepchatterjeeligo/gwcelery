@@ -396,7 +396,7 @@ def job_error_notification(request, exc, traceback, superevent_id, rundir):
 
 
 @app.task(ignore_result=True, shared=False)
-def _generate_and_upload_url(pe_results_path, graceid):
+def _upload_url(pe_results_path, graceid):
     """Generate the summary pages using PESummary."""
     path_to_posplots, = _find_paths_from_name(pe_results_path, 'home.html')
     baseurl = urllib.parse.urljoin(
@@ -421,12 +421,12 @@ def _generate_and_upload_url(pe_results_path, graceid):
                  "--webdir", webdir,
                  "--baseurl", baseurl,
                  "--samples", samples]
-    psd = ["--psd"] + psd
-    arguments += psd
+    #psd = ["--psd"] + psd
+    #arguments += psd
 
     subprocess.run(arguments)
 
-    path, = _find_paths_from_name(pe_results+path, "home.html")
+    path, = _find_paths_from_name(pe_results_path, "home.html")
     if os.path.isfile(path):
         gracedb.upload.delay(
             filecontents=None, filename=None, graceid=graceid,
@@ -482,7 +482,7 @@ def dag_prepare(rundir, ini_contents, preferred_event_id, superevent_id):
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,          
                        check=True)                                              
     except subprocess.CalledProcessError as e:                                  
-        contents = b'args:\n' + json.dumps(e.args[1]).encode('utf-8') + \       
+        contents = b'args:\n' + json.dumps(e.args[1]).encode('utf-8') + \
                    b'\n\nstdout:\n' + e.stdout + b'\n\nstderr:\n' + e.stderr    
         gracedb.upload.delay(                                                   
             filecontents=contents, filename='pe_dag.log',                       
@@ -552,16 +552,16 @@ def dag_finished(rundir, preferred_event_id, superevent_id):
     pe_results_path = \
         os.path.join(app.conf['pe_results_path'], preferred_event_id)
 
-    os.makedirs(os.path.join(pe_results_path, "psd")) 
+    #os.makedirs(os.path.join(pe_results_path, "psd")) 
 
-    psd_files = [i for i in _find_paths_from_name(rundir, "data-dump*-PSD.dat")]
-    for i in psd_files:
-        shutil.copy(psd_path, os.path.join(pe_results_path, "psd"))
+    #psd_files = [i for i in _find_paths_from_name(rundir, "data-dump*-PSD.dat")]
+    #for i in psd_files:
+    #    shutil.copy(psd_path, os.path.join(pe_results_path, "psd"))
 
     # FIXME: _upload_url.si has to be out of group for gracedb.create_label.si
     # to run
     return \
-        _generate_and_upload_url.si(rundir, pe_results_path, superevent_id) | \
+        _upload_url.si(pe_results_path, superevent_id) | \
         group(
             _upload_skymap(pe_results_path, superevent_id),
             _upload_result(
