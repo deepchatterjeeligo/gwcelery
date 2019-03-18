@@ -398,28 +398,19 @@ def job_error_notification(request, exc, traceback, superevent_id, rundir):
 @app.task(ignore_result=True, shared=False)
 def _upload_url(pe_results_path, graceid):
     """Generate the summary pages using PESummary."""
-    path_to_posplots, = _find_paths_from_name(pe_results_path, 'home.html')
-    baseurl = urllib.parse.urljoin(
-                  app.conf['pe_results_url'],
-                  os.path.relpath(
-                      path_to_posplots,
-                      app.conf['pe_results_path']
-                  )
-              )
     webdir = os.path.join(pe_results_path, event['graceid'],
                           "pesummary")
     samples, = _find_paths_from_name(pe_results_path, "posterior_samples.dat")
-    psd, = _find_paths_from_name(os.path.join(pe_results_path, "psd"), "*.dat")
+    #psd, = _find_paths_from_name(os.path.join(pe_results_path, "psd"), "*.dat")
 
     gracedb.upload.delay(
         filecontents=None, filename=None, graceid=superevent_id,
         message='Starting to generate summary pages with PESummary',
         tages='pe'
     )
-
+i
     arguments = ["summarypages.py",
                  "--webdir", webdir,
-                 "--baseurl", baseurl,
                  "--samples", samples]
     #psd = ["--psd"] + psd
     #arguments += psd
