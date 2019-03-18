@@ -408,10 +408,11 @@ def _upload_url(pe_results_path, graceid):
         message='Starting to generate summary pages with PESummary',
         tages='pe'
     )
-i
+
     arguments = ["summarypages.py",
                  "--webdir", webdir,
-                 "--samples", samples]
+                 "--samples", samples
+    ]
     #psd = ["--psd"] + psd
     #arguments += psd
 
