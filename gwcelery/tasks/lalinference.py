@@ -134,7 +134,7 @@ def pre_pe_tasks(event, superevent_id):
 
 @app.task(shared=False)
 def dag_prepare(
-    coinc_contents, ini_contents, rundir, superevent_id
+    cinc_contents, ini_contents, rundir, superevent_id
 ):
     """Create a Condor DAG to run LALInference on a given event.
 
@@ -266,10 +266,10 @@ def _generate_and_upload_url(rundir, pe_results_path, graceid):
     """Generate the summary pages using PESummary."""
     path_to_posplots, = _find_paths_from_name(pe_results_path, 'posplots.html')
     webdir = \
-        path_to_posplots.split("posplots.html")[0] + "/pesummary"
+        path_to_posplots.split("posplots.html")[0] + "pesummary"
 
     gracedb.upload.delay(
-        filecontents=None, filename=None, graceid=superevent_id,
+        filecontents=None, filename=None, graceid=graceid,
         message='Starting to generate summary pages with PESummary',
         tages='pe'
     )
@@ -277,7 +277,7 @@ def _generate_and_upload_url(rundir, pe_results_path, graceid):
     baseurl = urllib.parse.urljoin(
                   app.conf['pe_results_url'],
                   os.path.relpath(
-                      webdir+"/pesummary/home.html",
+                      webdir+"/home.html",
                       app.conf['pe_results_path']
                   )
               )
@@ -293,15 +293,16 @@ def _generate_and_upload_url(rundir, pe_results_path, graceid):
                    check=True
     )
 
-    path, = _find_paths_from_name(pe_results_path, "home.html")
-    if os.path.isfile(path):
+    try:
+        path, = _find_paths_from_name(pe_results_path, "home.html")
+
         gracedb.upload.delay(
             filecontents=None, filename=None, graceid=graceid,
             message=('LALInference online parameter estimation finished. '
                      'Results can be viewed <a href={}>here</a>').format(
                          baseurl), tags='pe'
         )
-    else:
+    except Exception:
         gracedb.upload.delay(
             filecontents=None, filename=None, graceid=graceid,
             message=('Failed to generate summary pages'), tags='pe'
