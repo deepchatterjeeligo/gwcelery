@@ -271,7 +271,7 @@ def _generate_and_upload_url(rundir, pe_results_path, graceid):
     gracedb.upload.delay(
         filecontents=None, filename=None, graceid=graceid,
         message='Starting to generate summary pages with PESummary',
-        tages='pe'
+        tags='pe'
     )
 
     baseurl = urllib.parse.urljoin(
