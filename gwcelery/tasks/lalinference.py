@@ -134,7 +134,7 @@ def pre_pe_tasks(event, superevent_id):
 
 @app.task(shared=False)
 def dag_prepare(
-    cinc_contents, ini_contents, rundir, superevent_id
+    coinc_contents, ini_contents, rundir, superevent_id
 ):
     """Create a Condor DAG to run LALInference on a given event.
 
