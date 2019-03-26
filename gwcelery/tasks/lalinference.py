@@ -277,7 +277,8 @@ def _generate_and_upload_url(rundir, pe_results_path, graceid, approximant):
         the approximant used in the analysis
     """
     path_to_posplots, = _find_paths_from_name(pe_results_path, 'posplots.html')
-    path_to_ini_file, = _find_paths_from_name(rundir, "config.ini")
+    path_to_ini_file, = _find_paths_from_name(pe_results_path, "config.ini")
+
     webdir = \
         path_to_posplots.split("posplots.html")[0] + "pesummary"
 
