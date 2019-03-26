@@ -287,6 +287,7 @@ def _generate_and_upload_url(rundir, pe_results_path, graceid):
     arguments = ["summarypages.py",
                  "--webdir", webdir,
                  "--samples", samples,
+                 "--approximant", "IMRPhenomPv2"
     ]
 
     subprocess.run(arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
