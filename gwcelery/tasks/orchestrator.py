@@ -6,7 +6,7 @@ import re
 from socket import gaierror
 from urllib.error import URLError
 
-from celery import chain, group
+from celery import group
 from ligo.gracedb.rest import HTTPError
 
 from ..import app
@@ -24,6 +24,22 @@ from . import skymaps
 from . import superevents
 
 
+@lvalert.handler('cbc_gstlal',
+                 'cbc_spiir',
+                 'cbc_pycbc',
+                 'cbc_mbtaonline',
+                 'burst_olib',
+                 'burst_cwb',
+                 'test_gstlal',
+                 'test_pycbc',
+                 'test_mbtaonline',
+                 shared=False)
+def handle_selected_as_preferred(alert):
+    if alert['alert_type'] == 'selected_as_preferred' \
+            and superevents.should_publish(alert['object']):
+        gracedb.create_label.delay('ADVREQ', alert['object']['superevent'])
+
+
 @lvalert.handler('superevent',
                  'mdc_superevent',
                  shared=False)
@@ -37,13 +53,13 @@ def handle_superevent(alert):
     calls :meth:`~gwcelery.tasks.orchestrator.preliminary_alert` to send a
     preliminary GCN notice.
     """
+    if alert['alert_type'] != 'label_added':
+        return
 
     superevent_id = alert['uid']
+    label_name = alert['data']['name']
 
-    if alert['alert_type'] == 'new':
-        start = alert['object']['t_start']
-        end = alert['object']['t_end']
-
+    if label_name == 'ADVREQ':
         (
             _get_preferred_event.si(superevent_id).set(
                 countdown=app.conf['orchestrator_timeout']
@@ -51,13 +67,15 @@ def handle_superevent(alert):
             |
             gracedb.get_event.s()
             |
-            detchar.check_vectors.s(superevent_id, start, end)
+            detchar.check_vectors.s(
+                superevent_id,
+                alert['object']['t_start'],
+                alert['object']['t_end']
+            )
             |
             preliminary_alert.s(superevent_id)
         ).apply_async()
 
-        # Wait for longer time before parameter estimation in case the
-        # preferred event is updated with high latency.
         (
             _get_preferred_event.si(superevent_id).set(
                 countdown=app.conf['pe_timeout']
@@ -70,13 +88,10 @@ def handle_superevent(alert):
             |
             parameter_estimation.s(superevent_id)
         ).apply_async()
-
-    elif alert['alert_type'] == 'label_added':
-        label_name = alert['data']['name']
-        if label_name == 'ADVOK':
-            initial_alert(superevent_id)
-        elif label_name == 'ADVNO':
-            retraction_alert(superevent_id)
+    elif label_name == 'ADVOK':
+        initial_alert(superevent_id)
+    elif label_name == 'ADVNO':
+        retraction_alert(superevent_id)
 
 
 @lvalert.handler('cbc_gstlal',
@@ -339,17 +354,11 @@ def preliminary_alert(event, superevent_id):
     if skymap_filename.endswith('.fits'):
         skymap_filename += '.gz'
 
-    # Determine if the event should be made public.
-    is_publishable = superevents.should_publish(event)
-
-    canvas = chain()
-
-    if is_publishable:
-        canvas |= (
-            gracedb.create_label.si('ADVREQ', superevent_id)
-            |
-            gracedb.expose.si(superevent_id)
-        )
+    canvas = (
+        gracedb.create_label.s('ADVREQ', superevent_id)
+        |
+        gracedb.expose.si(superevent_id)
+    )
 
     # If there is a sky map, then copy it to the superevent and create plots.
     if skymap_filename is not None:
@@ -419,36 +428,34 @@ def preliminary_alert(event, superevent_id):
     else:
         canvas |= identity.si(None)
 
-    # Send GCN notice and upload GCN circular draft for online events.
-    if is_publishable:
-        # compose preliminary GCN and send
-        canvas |= (
-            _create_voevent.s(
-                superevent_id, 'preliminary',
-                skymap_filename=skymap_filename,
-                internal=False,
-                open_alert=True
-            )
+    # Compose preliminary GCN and send.
+    canvas |= (
+        _create_voevent.s(
+            superevent_id, 'preliminary',
+            skymap_filename=skymap_filename,
+            internal=False,
+            open_alert=True
+        )
+        |
+        group(
+            gracedb.download.s(superevent_id)
             |
-            group(
-                gracedb.download.s(superevent_id)
-                |
-                gcn.send.s()
-                |
-                gracedb.create_label.si('GCN_PRELIM_SENT', superevent_id),
+            gcn.send.s()
+            |
+            gracedb.create_label.si('GCN_PRELIM_SENT', superevent_id),
 
-                gracedb.create_tag.s('public', superevent_id),
+            gracedb.create_tag.s('public', superevent_id),
 
-                circulars.create_initial_circular.si(superevent_id)
-                |
-                gracedb.upload.s(
-                    'preliminary-circular.txt',
-                    superevent_id,
-                    'Template for preliminary GCN Circular',
-                    tags=['em_follow']
-                )
+            circulars.create_initial_circular.si(superevent_id)
+            |
+            gracedb.upload.s(
+                'preliminary-circular.txt',
+                superevent_id,
+                'Template for preliminary GCN Circular',
+                tags=['em_follow']
             )
         )
+    )
 
     canvas.apply_async()
 
