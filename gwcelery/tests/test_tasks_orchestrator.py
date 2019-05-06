@@ -167,30 +167,6 @@ def test_handle_superevent(monkeypatch, toy_3d_fits_filecontents,  # noqa: F811
             start_pe.assert_not_called()
 
 
-@patch('gwcelery.tasks.gracedb.get_labels', return_value={'DQV', 'ADVREQ'})
-@patch('gwcelery.tasks.gracedb.get_event.run', return_value='event data')
-@patch('gwcelery.tasks.detchar.check_vectors.run')
-def test_handle_superevent_event_added(mock_check_vectors, mock_get_event,
-                                       mock_get_labels):
-    alert = {
-        'alert_type': 'event_added',
-        'uid': 'TS123456a',
-        'data': {'superevent_id': 'TS123456a',
-                 'preferred_event': 'G123456',
-                 't_start': 1.,
-                 't_0': 2.,
-                 't_end': 3.},
-        'object': {'superevent_id': 'TS123456a',
-                   'preferred_event': 'G123456',
-                   't_start': 1.,
-                   't_0': 2.,
-                   't_end': 3.}
-    }
-    orchestrator.handle_superevent(alert)
-    mock_check_vectors.assert_called_once_with(
-        'event data', 'TS123456a', 1., 3.)
-
-
 def superevent_initial_alert_download(filename, graceid):
     if filename == 'S1234-Initial-1.xml':
         return 'contents of S1234-Initial-1.xml'

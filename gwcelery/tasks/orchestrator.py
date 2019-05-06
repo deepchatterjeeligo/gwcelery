@@ -71,21 +71,6 @@ def handle_superevent(alert):
             parameter_estimation.s(superevent_id)
         ).apply_async()
 
-    # check DQV label on superevent, run check_vectors if required
-    elif alert['alert_type'] == 'event_added':
-        new_event_id = alert['data']['preferred_event']
-        start = alert['data']['t_start']
-        end = alert['data']['t_end']
-
-        if 'DQV' in gracedb.get_labels(superevent_id):
-            (
-                gracedb.get_event.s(new_event_id)
-                |
-                detchar.check_vectors.s(superevent_id, start, end)
-                |
-                _update_if_dqok.si(superevent_id, new_event_id)
-            ).apply_async()
-
     elif alert['alert_type'] == 'label_added':
         label_name = alert['data']['name']
         if label_name == 'ADVOK':
@@ -258,17 +243,6 @@ def _download(*args, **kwargs):
     return gracedb.download._orig_run(*args, **kwargs)
 
 
-@app.task(shared=False, ignore_result=True)
-def _update_if_dqok(superevent_id, event_id):
-    """Update `preferred_event` of `superevent_id` to `event_id`
-    if `DQOK` label has been applied
-    """
-    if 'DQOK' in gracedb.get_labels(superevent_id):
-        gracedb.update_superevent(superevent_id, preferred_event=event_id)
-        gracedb.create_log(
-            "DQOK applied based on new event %s" % (event_id), superevent_id)
-
-
 @gracedb.task(shared=False)
 def _get_preferred_event(superevent_id):
     """Determine preferred event for a superevent by querying GraceDB.
@@ -366,8 +340,7 @@ def preliminary_alert(event, superevent_id):
         skymap_filename += '.gz'
 
     # Determine if the event should be made public.
-    is_publishable = (superevents.should_publish(event)
-                      and {'DQV', 'INJ'}.isdisjoint(event['labels']))
+    is_publishable = superevents.should_publish(event)
 
     canvas = chain()
 

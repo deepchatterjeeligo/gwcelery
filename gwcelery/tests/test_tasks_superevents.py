@@ -78,6 +78,7 @@ class G330308HTTPResponse(object):
                     'snr': 10.17
                 }
             },
+            'labels': [],
             'search': 'AllSky',
             'superevent': 'S190421ar'
         }
@@ -110,6 +111,7 @@ class G330298HTTPResponse(object):
                     'snr': 10.51
                 }
             },
+            'labels': [],
             'search': 'HighMass',
             'superevent': 'S190421ar'
         }
@@ -147,6 +149,9 @@ def mock_db(monkeypatch):
                 raise ValueError("Called with incorrect preferred event %s"
                                  % (gid))
 
+    monkeypatch.setattr('gwcelery.tasks.detchar.check_vectors',
+                        lambda event, *args, **kwargs: event)
+
     monkeypatch.setattr('gwcelery.tasks.gracedb.client', FakeDb())
     yield
 
@@ -159,6 +164,7 @@ def test_update_preferred_event(mock_db):
                    offline=False,
                    superevent="some_superevent",
                    far=1e-30,
+                   labels=[],
                    extra_attributes=dict(CoincInspiral=dict(snr=30.0)))
     with patch.object(gracedb.client, 'updateSuperevent') as p:
         superevents._update_superevent('S0039',
@@ -198,7 +204,8 @@ def _mock_event(event):
             "extra_attributes": {
                 "CoincInspiral": {"snr": 20}
             },
-            "offline": False
+            "offline": False,
+            "labels": []
         }
 
 
@@ -224,7 +231,8 @@ def test_upload_same_event():
             "extra_attributes": {
                 "CoincInspiral": {"snr": 20}
             },
-            "offline": False
+            "offline": False,
+            "labels": []
         }
     }
     with patch.object(gracedb.client, 'addEventToSuperevent') as p1, \
@@ -247,6 +255,7 @@ def test_should_publish(group, pipeline, offline, far, instruments,
                  pipeline=pipeline,
                  far=far,
                  offline=offline,
+                 labels=[],
                  instruments=instruments)
     result = superevents.should_publish(event)
     assert result == expected_result
@@ -271,6 +280,7 @@ def test_parse_trigger_cbc_1(mock_db):
                            'group': 'CBC',
                            'pipeline': 'gstlal',
                            'offline': False,
+                           'labels': [],
                            'far': 3e-09,
                            'instruments': 'H1,L1',
                            'extra_attributes': {
@@ -294,6 +304,7 @@ def test_parse_trigger_cbc_2(mock_db):
                            'group': 'CBC',
                            'pipeline': 'gstlal',
                            'offline': False,
+                           'labels': [],
                            'far': 3e-31,
                            'instruments': 'H1,L1',
                            'extra_attributes': {
@@ -320,6 +331,7 @@ def test_parse_trigger_cbc_3(mock_db):
                            'group': 'CBC',
                            'pipeline': 'gstlal',
                            'offline': False,
+                           'labels': [],
                            'far': 3e-31,
                            'instruments': 'H1,L1,V1',
                            'extra_attributes': {
@@ -341,6 +353,7 @@ def test_parse_trigger_cbc_4(mock_db):
                            'group': 'CBC',
                            'pipeline': 'gstlal',
                            'offline': False,
+                           'labels': [],
                            'far': 5.5e-02,
                            'instruments': 'H1,L1,V1',
                            'extra_attributes': {
@@ -367,6 +380,7 @@ def test_parse_trigger_burst_1(mock_db):
                            'group': 'Burst',
                            'pipeline': 'cwb',
                            'offline': False,
+                           'labels': [],
                            'far': 3.02e-09,
                            'instruments': 'H1,L1',
                            'extra_attributes': {
@@ -400,6 +414,7 @@ def test_parse_trigger_burst_2(mock_db):
                            'group': 'Burst',
                            'pipeline': 'oLIB',
                            'offline': False,
+                           'labels': [],
                            'far': 3.02e-16,
                            'instruments': 'H1,L1',
                            'extra_attributes': {
@@ -429,6 +444,7 @@ def test_parse_trigger_burst_3(mock_db):
                            'group': 'Burst',
                            'pipeline': 'oLIB',
                            'offline': False,
+                           'labels': [],
                            'far': 3.02e-16,
                            'instruments': 'H1,L1',
                            'extra_attributes': {
@@ -459,6 +475,7 @@ def test_parse_trigger_burst_4(mock_db):
                            'group': 'Burst',
                            'pipeline': 'CWB',
                            'offline': False,
+                           'labels': [],
                            'far': 1.23e-09,
                            'instruments': 'H1,L1',
                            'extra_attributes': {
@@ -489,6 +506,7 @@ def test_S190421ar_spiir_scenario(mock_db):    # noqa: N802
                            'instruments': 'H1,L1',
                            'pipeline': 'spiir',
                            'offline': False,
+                           'labels': [],
                            'extra_attributes': {
                                'CoincInspiral': {
                                    'snr': 10.5107507705688}}},

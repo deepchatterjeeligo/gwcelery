@@ -12,6 +12,17 @@ Changelog
 -   Move RAVEN time coincidence windows to config file to be easily reviewed
     or changed later.
 
+-   Move the DQV label check into the public alert criterion.
+
+    Previously, the data quality check was re-run by the Orchestrator whenever
+    an event was added to a superevent. Depending on the result, the superevent
+    would have been updated. This feedback between the Orchestrator and the
+    Superevent Manager was race-prone.
+
+    Now, the Superevent Manager is responsible for running data quality checks
+    whenever an event is ingested, and the data quality status is included in
+    both the public alert condition and the preferred event sorting key.
+
 0.6.2 (2019-06-07)
 ------------------
 

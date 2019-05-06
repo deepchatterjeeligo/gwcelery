@@ -10,7 +10,7 @@ from celery.utils.log import get_task_logger
 from ligo.segments import segment, segmentlist
 
 from ..import app
-from . import gracedb, lvalert
+from . import detchar, gracedb, lvalert
 
 log = get_task_logger(__name__)
 
@@ -45,6 +45,12 @@ def handle(payload):
             return
 
     event_info = payload['object']
+    t_0, t_start, t_end = get_ts(event_info)
+    try:
+        event_info = detchar.check_vectors(event_info, gid, t_start, t_end)
+    except:  # noqa: E722
+        # Don't let failed DQ check stop superevent processing.
+        log.exception('check_vectors failed')
 
     if event_info.get('search') == 'MDC':
         category = 'mdc'
@@ -64,8 +70,6 @@ def handle(payload):
             break  # Found matching superevent
     else:
         sid = None  # No matching superevent
-
-    t_0, t_start, t_end = get_ts(event_info)
 
     if sid is None:
         log.debug('Entered 1st if')
@@ -227,6 +231,7 @@ def should_publish(event):
     All of the following conditions must be true for a public alert:
 
     *   The event's ``offline`` flag is not set.
+    *   The event does not have the ``DQV`` label.
     *   The event's false alarm rate, weighted by the group-specific trials
         factor as specified by the
         :obj:`~gwcelery.conf.preliminary_alert_trials_factor` configuration
@@ -249,7 +254,8 @@ def should_publish(event):
     trials_factor = app.conf['preliminary_alert_trials_factor'][group]
     far_threshold = app.conf['preliminary_alert_far_threshold'][group]
     far = trials_factor * event['far']
-    return not event['offline'] and far <= far_threshold
+    return (not event['offline'] and {'DQV', 'INJ'}.isdisjoint(event['labels'])
+            and far <= far_threshold)
 
 
 def keyfunc(event):
