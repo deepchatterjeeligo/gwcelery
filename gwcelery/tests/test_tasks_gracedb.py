@@ -42,8 +42,17 @@ def test_create_label(mock_gracedb):
 
 
 @patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
+def test_remove_label(mock_gracedb):
+    # Run function under test.
+    gracedb.remove_label('label', 'graceid')
+
+    # Check that one file was downloaded.
+    mock_gracedb.removeLabel.assert_called_once_with('graceid', 'label')
+
+
+@patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
 def test_create_signoff(mock_gracedb):
-    """Create a label in GraceDb."""
+    """Create a label in GraceDB."""
     gracedb.create_signoff('status', 'comment', 'signoff_type', 'graceid')
     mock_gracedb.create_signoff.assert_called_once_with(
         'graceid', 'signoff_type', 'status', 'comment')
@@ -122,7 +131,7 @@ def test_get_superevent(mock_gracedb):
 @patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
 def test_get_superevents(mock_gracedb):
     gracedb.get_superevents('query')
-    mock_gracedb.superevents.assert_called_once_with('query', orderby='t_0')
+    mock_gracedb.superevents.assert_called_once_with('query')
 
 
 @patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)

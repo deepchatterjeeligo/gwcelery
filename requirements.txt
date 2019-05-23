@@ -1,6 +1,5 @@
 astropy
-celery[redis] >= 4.2.0
-celery_eternal >= 0.0.3
+celery[redis] >= 4.3.0
 comet
 corner
 flask
@@ -10,18 +9,20 @@ gwdatafind
 gwpy <= 0.14.0  # https://git.ligo.org/emfollow/gwcelery/issues/95
 healpy
 jinja2
-lalsuite >= 6.53.1.dev20190324
-ligo-followup-advocate >= 0.0.24
+lalsuite >= 6.54
+ligo-followup-advocate >= 0.0.28
 ligo-gracedb >= 2.2.0
-ligo-raven >= 1.10
+ligo-raven >= 1.11
 ligo-segments
 ligo.skymap >= 0.1.1
 lscsoft-glue
 lxml
+matplotlib < 3.1  # matplotlib 3.1 breaks gwpy
 numpy
-p_astro==0.4
+p_astro==0.7
 pygcn >= 0.1.19
 pytest >= 3.0
+python-ligo-lw
 safe-netrc
 sentry-sdk[flask]
 service_identity  # We don't actually use this package, but it silences some annoying warnings from twistd.
@@ -29,3 +30,4 @@ sleek-lvalert >= 0.0.4
 tornado < 6  # Tornado 6.0.0 breaks Flower because it removed tornado.web.asynchronous
 voeventlib >= 1.2
 pesummary
+werkzeug >= 0.15.0  # for werkzeug.middleware.proxy_fix.ProxyFix

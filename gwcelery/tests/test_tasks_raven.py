@@ -8,23 +8,25 @@ from ..tasks import gracedb, raven
 
 @pytest.mark.parametrize(
     'group,gracedb_id,pipelines,tl,th',
-    [['CBC', 'S1', ['Fermi', 'Swift'], -1, 5], ['CBC', 'E1', [], -5, 1],
+    [['CBC', 'S1', ['Fermi', 'Swift'], -1, 5],
      ['Burst', 'S2', ['Fermi', 'Swift'], -60, 600],
-     ['Burst', 'E2', [], -600, 60], ['Burst', 'S3', ['SNEWS'], -10, 10],
-     ['Burst', 'E3', ['SNEWS'], -10, 10]])
+     ['Burst', 'S3', ['SNEWS'], -10, 10]])
 @patch('gwcelery.tasks.raven.add_exttrig_to_superevent.run')
 @patch('gwcelery.tasks.raven.search.run')
-def test_coincidence_search(mock_search, mock_add_exttrig_to_superevent,
+@patch('gwcelery.tasks.raven.calculate_coincidence_far')
+def test_coincidence_search(mock_calculate_coincidence_far,
+                            mock_search, mock_add_exttrig_to_superevent,
                             group, gracedb_id, pipelines, tl, th):
     """Test that correct time windows are used for each RAVEN search."""
     alert_object = {'superevent_id': gracedb_id}
 
     raven.coincidence_search(gracedb_id, alert_object, group,
-                             pipelines).delay()
+                             pipelines)
 
     mock_search.assert_called_once_with(
         gracedb_id, alert_object, tl, th, group, pipelines)
     mock_add_exttrig_to_superevent.assert_called_once()
+    mock_calculate_coincidence_far.assert_called()
 
 
 @pytest.mark.parametrize(
@@ -57,7 +59,9 @@ def test_raven_search(mock_raven_search, mock_se_cls, mock_exttrig_cls,
     'graceid,raven_search_results',
     [['S1234', [{'graceid': 'E1'}, {'graceid': 'E2'}, {'graceid': 'E3'}]],
      ['E1234', [{'superevent_id': 'S1'}]]])
-def test_add_exttrig_to_superevent(monkeypatch, graceid, raven_search_results):
+@patch('gwcelery.tasks.gracedb.add_event_to_superevent')
+def test_add_exttrig_to_superevent(mock_add_event_to_superevent,
+                                   graceid, raven_search_results):
     """Test that external triggers are correctly used to update superevents."""
 
     # run function under test
@@ -65,10 +69,10 @@ def test_add_exttrig_to_superevent(monkeypatch, graceid, raven_search_results):
     if graceid.startswith('E'):
         for superevent in raven_search_results:
             superevent_id = superevent['superevent_id']
-            gracedb.client.addEventToSuperevent.assert_called_with(
+            mock_add_event_to_superevent.assert_called_with(
                 superevent_id, graceid)
     if graceid.startswith('S'):
-        gracedb.client.addEventToSuperevent.assert_has_calls([
+        mock_add_event_to_superevent.assert_has_calls([
              call(graceid, exttrig['graceid'])
              for exttrig in raven_search_results])
 
@@ -89,11 +93,8 @@ def mock_get_event(exttrig_id):
 @patch('gwcelery.tasks.gracedb.get_superevent',
        return_value={'em_events': ['E1', 'E2', 'E3']})
 @patch('gwcelery.tasks.raven.calc_signif')
-@patch('ligo.raven.gracedb_events.ExtTrig')
-@patch('ligo.raven.gracedb_events.SE')
 def test_calculate_coincidence_far(
-        mock_se_cls, mock_exttrig_cls, mock_calc_signif,
-        mock_get_superevent, group):
+        mock_calc_signif, mock_get_superevent, group):
     raven.calculate_coincidence_far('S1234', group).delay().get()
 
 
@@ -104,40 +105,31 @@ def test_calculate_coincidence_far(
 @patch('gwcelery.tasks.ligo_fermi_skymaps.get_preferred_skymap',
        return_value='bayestar.fits.gz')
 @patch('gwcelery.tasks.raven.calc_signif')
-@patch('ligo.raven.gracedb_events.ExtTrig')
-@patch('ligo.raven.gracedb_events.SE')
 def test_calculate_spacetime_coincidence_far(
-        mock_se_cls, mock_exttrig_cls, mock_calc_signif,
-        mock_get_preferred_skymap, mock_get_superevent, mock_download, group,
-        toy_fits_filecontents):  # noqa: F811
+        mock_calc_signif, mock_get_preferred_skymap, mock_get_superevent,
+        mock_download, group, toy_fits_filecontents):  # noqa: F811
     mock_download.return_value = toy_fits_filecontents
     raven.calculate_spacetime_coincidence_far(
         'S1234', group).delay().get()
 
 
-@patch('ligo.raven.gracedb_events.ExtTrig')
-@patch('ligo.raven.gracedb_events.SE')
 @patch('ligo.raven.search.calc_signif_gracedb')
 def test_calc_signif(
-        mock_raven_calc_signif, mock_se_cls, mock_exttrig_cls):
-    se = mock_se_cls('S1', gracedb=gracedb.client)
-    exttrig = mock_exttrig_cls('E1', gracedb=gracedb.client)
+        mock_raven_calc_signif):
     tl, th = -1, 5
-    raven.calc_signif(se, exttrig, tl, th, incl_sky=False)
+    raven.calc_signif('S1234', 'E1234', tl, th, incl_sky=False)
 
     mock_raven_calc_signif.assert_called_once_with(
-        se, exttrig, tl, th, incl_sky=False)
+        'S1234', 'E1234', tl, th, se_fitsfile=None, incl_sky=False,
+        gracedb=gracedb.client)
 
 
-@patch('ligo.raven.gracedb_events.ExtTrig')
-@patch('ligo.raven.gracedb_events.SE')
 @patch('ligo.raven.search.calc_signif_gracedb')
-def test_calc_signif_skymaps(
-        mock_raven_calc_signif, mock_se_cls, mock_exttrig_cls):
-    se = mock_se_cls('S1', fitsfile='bayestar.fits.gz', gracedb=gracedb.client)
-    exttrig = mock_exttrig_cls('E1', gracedb=gracedb.client)
+def test_calc_signif_skymaps(mock_raven_calc_signif):
     tl, th = -1, 5
-    raven.calc_signif(se, exttrig, tl, th, incl_sky=True)
+    raven.calc_signif('S1234', 'E1234', tl, th, incl_sky=True,
+                      se_fitsfile='bayestar.fits.gz')
 
     mock_raven_calc_signif.assert_called_once_with(
-        se, exttrig, tl, th, incl_sky=True)
+        'S1234', 'E1234', tl, th, se_fitsfile='bayestar.fits.gz',
+        incl_sky=True, gracedb=gracedb.client)

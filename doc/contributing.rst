@@ -52,7 +52,7 @@ Guidelines for tasks
    :ref:`celery:task-best-practices` section.
 
 -  **Tasks should avoid saving files to disk.** Output should be placed
-   directly in GraceDb. Temporary files that are written in ``/tmp`` are OK but
+   directly in GraceDB. Temporary files that are written in ``/tmp`` are OK but
    should be cleaned up promptly.
 
    See also the Celery manual's notes on :ref:`celery:task-data-locality` and
@@ -111,5 +111,13 @@ Documentation
 -------------
 
 Documentation strings should be written in the `Numpydoc style`_.
+
+To build the documentation, run the following command in the top of your source
+directory::
+
+    $ python setup.py build_sphinx
+
+Then to view the documentation, open the file ``build/sphinx/html/index.html``
+in your favorite web browser.
 
 .. _`Numpydoc style`: http://numpydoc.readthedocs.io/

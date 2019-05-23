@@ -20,15 +20,13 @@ def test_nagios_unknown_error(monkeypatch, capsys):
     assert 'UNKNOWN: Unexpected error' in out
 
 
-def test_nagios(capsys, monkeypatch, socket_enabled,
-                starter, tmpdir):
+def test_nagios(capsys, monkeypatch, socket_enabled, starter):
     mock_lvalert_client = Mock()
-    monkeypatch.setattr('sleek_lvalert.LVAlertClient', mock_lvalert_client)
+    monkeypatch.setattr(
+        'gwcelery.lvalert.client.LVAlertClient', mock_lvalert_client)
+    unix_socket = app.conf['broker_url'].replace('redis+socket://', '')
 
     # no broker
-
-    unix_socket = str(tmpdir / 'sock')
-    monkeypatch.setenv('CELERY_BROKER_URL', 'redis+socket://' + unix_socket)
 
     with pytest.raises(SystemExit) as excinfo:
         app.start(['gwcelery', 'nagios'])
@@ -52,23 +50,13 @@ def test_nagios(capsys, monkeypatch, socket_enabled,
     out, err = capsys.readouterr()
     assert 'CRITICAL: Not all expected queues are active' in out
 
-    # worker, no tasks
+    # worker, no LVAlert nodes
 
     starter.python_process(
         args=(['gwcelery', 'worker', '-l', 'info', '--pool', 'solo',
                '-Q', 'celery,exttrig,openmp,superevent,voevent'],),
         target=app.start, timeout=10, magic_words=b'ready.')
 
-    with pytest.raises(SystemExit) as excinfo:
-        app.start(['gwcelery', 'nagios'])
-    assert excinfo.value.code == nagios.NagiosPluginStatus.CRITICAL
-    out, err = capsys.readouterr()
-    assert 'CRITICAL: Not all expected tasks are active' in out
-
-    # tasks, no LVAlert nodes
-
-    monkeypatch.setattr('gwcelery.tools.nagios.get_active_tasks',
-                        lambda _: nagios.get_expected_tasks(app))
     mock_lvalert_client.configure_mock(**{
         'return_value.get_subscriptions.return_value': {}})
 
@@ -80,9 +68,10 @@ def test_nagios(capsys, monkeypatch, socket_enabled,
 
     # tasks, too many LVAlert nodes
 
-    mock_lvalert_client.configure_mock(**{
-        'return_value.get_subscriptions.return_value':
-        nagios.get_expected_lvalert_nodes() | {'foobar'}})
+    expected_lvalert_nodes = nagios.get_expected_lvalert_nodes(app)
+    monkeypatch.setattr(
+        'celery.app.control.Inspect.stats', Mock(return_value={'foo': {
+            'lvalert-nodes': expected_lvalert_nodes | {'foobar'}}}))
 
     with pytest.raises(SystemExit) as excinfo:
         app.start(['gwcelery', 'nagios'])
@@ -90,11 +79,38 @@ def test_nagios(capsys, monkeypatch, socket_enabled,
     out, err = capsys.readouterr()
     assert 'CRITICAL: Too many lvalert nodes are subscribed' in out
 
+    # LVAlert nodes present, no VOEvent broker peers
+
+    monkeypatch.setattr(
+        'celery.app.control.Inspect.stats', Mock(return_value={'foo': {
+            'lvalert-nodes': expected_lvalert_nodes}}))
+
+    with pytest.raises(SystemExit) as excinfo:
+        app.start(['gwcelery', 'nagios'])
+    assert excinfo.value.code == nagios.NagiosPluginStatus.CRITICAL
+    out, err = capsys.readouterr()
+    assert 'CRITICAL: The VOEvent broker has no active connections' in out
+
+    # VOEvent broker peers, no VOEvent receiver peers
+
+    monkeypatch.setattr(
+        'celery.app.control.Inspect.stats', Mock(return_value={'foo': {
+            'voevent-broker-peers': ['127.0.0.1'],
+            'lvalert-nodes': expected_lvalert_nodes}}))
+
+    with pytest.raises(SystemExit) as excinfo:
+        app.start(['gwcelery', 'nagios'])
+    assert excinfo.value.code == nagios.NagiosPluginStatus.CRITICAL
+    out, err = capsys.readouterr()
+    assert 'CRITICAL: The VOEvent receiver has no active connections' in out
+
     # success
 
-    mock_lvalert_client.configure_mock(**{
-        'return_value.get_subscriptions.return_value':
-        nagios.get_expected_lvalert_nodes()})
+    monkeypatch.setattr(
+        'celery.app.control.Inspect.stats',
+        Mock(return_value={'foo': {'voevent-broker-peers': ['127.0.0.1'],
+                                   'voevent-receiver-peers': ['127.0.0.1'],
+                                   'lvalert-nodes': expected_lvalert_nodes}}))
 
     with pytest.raises(SystemExit) as excinfo:
         app.start(['gwcelery', 'nagios'])

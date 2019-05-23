@@ -12,9 +12,12 @@ import urllib
 
 from celery import group
 from gwdatafind import find_urls
+from ligo.gracedb.exceptions import HTTPError
+import numpy as np
 
 from .. import app
 from ..jinja import env
+from .core import ordered_group
 from . import condor
 from . import gracedb
 from . import skymaps
@@ -90,7 +93,7 @@ def upload_no_frame_files(request, exc, traceback, superevent_id):
     traceback : str (placeholder)
         Traceback message from a task
     superevent_id : str
-        The GraceDb ID of a target superevent
+        The GraceDB ID of a target superevent
     """
     if isinstance(exc, NotEnoughData):
         gracedb.upload.delay(
@@ -99,6 +102,42 @@ def upload_no_frame_files(request, exc, traceback, superevent_id):
             message='Frame files have not been found.',
             tags='pe'
         )
+
+
+def _find_appropriate_cal_env(trigtime, dir_name):
+    """Return the path to the calibration uncertainties estimated at the time
+    before and closest to the trigger time. If there are no calibration
+    uncertainties estimated before the trigger time, return the oldest one. The
+    gpstimes at which the calibration uncertainties were estimated and the
+    names of the files containing the uncertaintes are saved in
+    [HLV]_CalEnvs.txt.
+
+    Parameters
+    ----------
+    trigtime : float
+        The trigger time of a target event
+    dir_name : str
+        The path to the directory where files containing calibration
+        uncertainties exist
+
+    Return
+    ------
+    path : str
+        The path to the calibration uncertainties appropriate for a target
+        event
+    """
+    filename, = glob.glob(os.path.join(dir_name, '[HLV]_CalEnvs.txt'))
+    calibration_index = np.atleast_1d(
+        np.recfromtxt(filename, names=['gpstime', 'filename'])
+    )
+    gpstimes = calibration_index['gpstime']
+    candidate_gpstimes = gpstimes < trigtime
+    if np.any(candidate_gpstimes):
+        idx = np.argmax(gpstimes * candidate_gpstimes)
+        appropriate_cal = calibration_index['filename'][idx]
+    else:
+        appropriate_cal = calibration_index['filename'][np.argmin(gpstimes)]
+    return os.path.join(dir_name, appropriate_cal.decode('utf-8'))
 
 
 @app.task(shared=False)
@@ -111,6 +150,7 @@ def prepare_ini(frametype_dict, event, superevent_id=None):
 
     # fill out the ini template and return the resultant content
     singleinspiraltable = event['extra_attributes']['SingleInspiral']
+    trigtime = event['gpstime']
     ini_settings = {
         'service_url': gracedb.client._service_url,
         'types': frametype_dict,
@@ -119,6 +159,18 @@ def prepare_ini(frametype_dict, event, superevent_id=None):
         'webdir': os.path.join(app.conf['pe_results_path'], event['graceid']),
         'paths': [{'name': name, 'path': find_executable(executable)}
                   for name, executable in executables.items()],
+        'h1_calibration': _find_appropriate_cal_env(
+            trigtime,
+            '/home/cbc/pe/O3/calibrationenvelopes/LIGO_Hanford'
+        ),
+        'l1_calibration': _find_appropriate_cal_env(
+            trigtime,
+            '/home/cbc/pe/O3/calibrationenvelopes/LIGO_Livingston'
+        ),
+        'v1_calibration': _find_appropriate_cal_env(
+            trigtime,
+            '/home/cbc/pe/O3/calibrationenvelopes/Virgo'
+        ),
         'q': min([sngl['mass2'] / sngl['mass1']
                   for sngl in singleinspiraltable]),
     }
@@ -134,30 +186,41 @@ def pre_pe_tasks(event, superevent_id):
 
 @app.task(shared=False)
 def dag_prepare(
-    cinc_contents, ini_contents, rundir, superevent_id
+    coinc_psd, ini_contents, rundir, superevent_id
 ):
     """Create a Condor DAG to run LALInference on a given event.
 
     Parameters
     ----------
-    coinc_contents : bytes
-        The byte contents of ``coinc.xml``
+    coinc_psd : tuple
+        The tuple of the byte contents of ``coinc.xml`` and ``psd.xml.gz``
     ini_contents : str
         The content of online_pe.ini
     rundir : str
         The path to a run directory where the DAG file exits
     superevent_id : str
-        The GraceDb ID of a target superevent
+        The GraceDB ID of a target superevent
 
     Returns
     -------
     submit_file : str
         The path to the .sub file
     """
+    coinc_contents, psd_contents = coinc_psd
+
     # write down coicn.xml in the run directory
     path_to_coinc = os.path.join(rundir, 'coinc.xml')
     with open(path_to_coinc, 'wb') as f:
         f.write(coinc_contents)
+
+    # write down psd.xml.gz
+    if psd_contents is not None:
+        path_to_psd = os.path.join(rundir, 'psd.xml.gz')
+        with open(path_to_psd, 'wb') as f:
+            f.write(psd_contents)
+        psd_arg = ['--psd', path_to_psd]
+    else:
+        psd_arg = []
 
     # write down .ini file in the run directory
     path_to_ini = rundir + '/' + ini_name
@@ -165,16 +228,11 @@ def dag_prepare(
         f.write(ini_contents)
 
     # run lalinference_pipe
-    gracedb.upload.delay(
-        filecontents=None, filename=None, graceid=superevent_id,
-        message='starting LALInference online parameter estimation',
-        tags='pe'
-    )
     try:
-        subprocess.run(['lalinference_pipe', '--run-path', rundir,
-                        '--coinc', path_to_coinc, path_to_ini],
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                       check=True)
+        lalinference_arg = ['lalinference_pipe', '--run-path', rundir,
+                            '--coinc', path_to_coinc, path_to_ini] + psd_arg
+        subprocess.run(lalinference_arg, stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE, check=True)
         subprocess.run(['condor_submit_dag', '-no_submit',
                         rundir + '/multidag.dag'],
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -226,7 +284,7 @@ def job_error_notification(request, exc, traceback, superevent_id, rundir):
     traceback : str (placeholder)
         Traceback message from a task
     superevent_id : str
-        The GraceDb ID of a target superevent
+        The GraceDB ID of a target superevent
     rundir : str
         The run directory for PE
     """
@@ -264,49 +322,22 @@ def job_error_notification(request, exc, traceback, superevent_id, rundir):
 @app.task(ignore_result=True, shared=False)
 def _generate_and_upload_url(rundir, pe_results_path, graceid):
     """Generate the summary pages using PESummary."""
-    path_to_posplots, = _find_paths_from_name(pe_results_path, 'posplots.html')
-    webdir = \
-        path_to_posplots.split("posplots.html")[0] + "pesummary"
-
-    gracedb.upload.delay(
-        filecontents=None, filename=None, graceid=graceid,
-        message='Starting to generate summary pages with PESummary',
-        tages='pe'
-    )
+    path_to_posplots, = _find_paths_from_name(pe_results_path, 'home.html')
 
     baseurl = urllib.parse.urljoin(
                   app.conf['pe_results_url'],
                   os.path.relpath(
-                      webdir+"/home.html",
+                      path_to_posplots,
                       app.conf['pe_results_path']
                   )
               )
-    samples, = _find_paths_from_name(pe_results_path, "posterior_samples.dat")
-    psd_files = [i for i in _find_paths_from_name(rundir, "data-dump*-PSD.dat")]
 
-    arguments = ["summarypages.py",
-                 "--webdir", webdir,
-                 "--samples", samples,
-    ]
-
-    subprocess.run(arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                   check=True
+    gracedb.upload.delay(
+        filecontents=None, filename=None, graceid=graceid,
+        message=('LALInference online parameter estimation finished. '
+                 'Results can be viewed <a href={}>here</a>').format(
+                     baseurl), tags='pe'
     )
-
-    try:
-        path, = _find_paths_from_name(pe_results_path, "home.html")
-
-        gracedb.upload.delay(
-            filecontents=None, filename=None, graceid=graceid,
-            message=('LALInference online parameter estimation finished. '
-                     'Results can be viewed <a href={}>here</a>').format(
-                         baseurl), tags='pe'
-        )
-    except Exception:
-        gracedb.upload.delay(
-            filecontents=None, filename=None, graceid=graceid,
-            message=('Failed to generate summary pages'), tags='pe'
-        )
 
 
 @app.task(ignore_result=True, shared=False)
@@ -322,7 +353,7 @@ def _get_result_contents(pe_results_path, filename):
 
 def _upload_result(pe_results_path, filename, graceid, message, tag):
     """Return a canvas to get the contents of a PE result file and upload it to
-    GraceDb.
+    GraceDB.
     """
     return _get_result_contents.si(pe_results_path, filename) | \
         gracedb.upload.s(filename, graceid, message, tag)
@@ -358,9 +389,9 @@ def dag_finished(rundir, preferred_event_id, superevent_id):
     rundir : str
         The path to a run directory where the DAG file exits
     preferred_event_id : str
-        The GraceDb ID of a target preferred event
+        The GraceDB ID of a target preferred event
     superevent_id : str
-        The GraceDb ID of a target superevent
+        The GraceDB ID of a target superevent
 
     Returns
     -------
@@ -371,15 +402,10 @@ def dag_finished(rundir, preferred_event_id, superevent_id):
     pe_results_path = \
         os.path.join(app.conf['pe_results_path'], preferred_event_id)
 
-    #os.makedirs(os.path.join(pe_results_path, "psd")) 
-
-    #psd_files = [i for i in _find_paths_from_name(rundir, "data-dump*-PSD.dat")]
-    #for i in psd_files:
-    #    shutil.copy(psd_path, os.path.join(pe_results_path, "psd"))
-
     # FIXME: _upload_url.si has to be out of group for gracedb.create_label.si
     # to run
     return \
+        _upload_url.si(pe_results_path, superevent_id) | \
         group(
             _upload_skymap(pe_results_path, superevent_id),
             _upload_result(
@@ -387,15 +413,22 @@ def dag_finished(rundir, preferred_event_id, superevent_id):
                 'Corner plot for extrinsic parameters', 'pe'
             ),
             _upload_result(
-                pe_results_path, 'intrinsic.png', superevent_id,
-                'Corner plot for intrinsic parameters', 'pe'
-            ),
-            _upload_result(
                 pe_results_path, 'sourceFrame.png', superevent_id,
                 'Corner plot for source frame parameters', 'pe'
             )
         ) | gracedb.create_label.si('PE_READY', superevent_id) | \
         clean_up.si(rundir)
+
+
+@gracedb.task(shared=False)
+def _download_psd(gid):
+    """Download ``psd.xml.gz`` and return its content. If that file does not
+    exist, return None.
+    """
+    try:
+        return gracedb.download("psd.xml.gz", gid)
+    except HTTPError:
+        return None
 
 
 @app.task(ignore_result=True, shared=False)
@@ -407,19 +440,31 @@ def start_pe(ini_contents, preferred_event_id, superevent_id):
     ini_contents : str
         The content of online_pe.ini
     preferred_event_id : str
-        The GraceDb ID of a target preferred event
+        The GraceDB ID of a target preferred event
     superevent_id : str
-        The GraceDb ID of a target superevent
+        The GraceDB ID of a target superevent
     """
+    gracedb.upload.delay(
+        filecontents=None, filename=None, graceid=superevent_id,
+        message=('starting LALInference online parameter estimation '
+                 'for {}').format(preferred_event_id),
+        tags='pe'
+    )
+
     # make a run directory
     lalinference_dir = os.path.expanduser('~/.cache/lalinference')
     mkpath(lalinference_dir)
-    rundir = tempfile.mkdtemp(dir=lalinference_dir)
-    pe_results_path = \
-        os.path.join(app.conf['pe_results_path'], preferred_event_id)
+    rundir = tempfile.mkdtemp(dir=lalinference_dir,
+                              prefix='{}_'.format(superevent_id))
+    # give permissions to read the files under the run directory so that PE
+    # ROTA people can check the status of parameter estimation.
+    os.chmod(rundir, 0o755)
 
     (
-        gracedb.download.s('coinc.xml', preferred_event_id)
+        ordered_group(
+            gracedb.download.s('coinc.xml', preferred_event_id),
+            _download_psd.s(preferred_event_id)
+        )
         |
         dag_prepare.s(ini_contents, rundir, superevent_id)
         |

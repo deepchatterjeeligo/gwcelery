@@ -5,7 +5,7 @@ explanation on jinja is here http://jinja.pocoo.org . #}
 {% set nparallel = '4' %}
 {% set roq = 'True' %}
 {% set roqdir = '/home/cbc/ROQ_data/IMRPhenomPv2/' %}
-{% set approx = 'IMRPhenomPv2pseudFourPN' %}
+{% set approx = 'IMRPhenomPv2pseudoFourPN' %}
 {% set neff = '1000' %}
 
 {# IMRPhenomPv2_ROQ can not be applied for large massratio #}
@@ -24,16 +24,12 @@ explanation on jinja is here http://jinja.pocoo.org . #}
     {% set margphi = 'margphi=' %}
 {% endif %}
 
-{# FIXME: Focusing only on lalinfernece_mcmc is not ideal for test, but the run
-with this setting is known to finish within ~30 minutes #}
 {% if 'playground' in service_url %}
-    {% set engine = 'lalinferencemcmc' %}
-    {% set nparallel = '2' %}
-    {% set row = 'False' %}
-    {% set neff = '200' %}
-    {% set disable_spin = 'disable-spin=' %}
-    {% set zeroLogLike = 'zeroLogLike=' %}
+    {% set accounting_group = 'ligo.dev.o3.cbc.pe.lalinference' %}
+{% else %}
+    {% set accounting_group = 'ligo.prod.o3.cbc.pe.lalinference' %}
 {% endif %}
+
 
 [analysis]
 ifos=['H1', 'L1', 'V1']
@@ -48,6 +44,8 @@ osg=False
 
 
 [paths]
+# Replace the webdir with a directory under your public_html when you start a
+# run manually based on this ini file.
 webdir={{ webdir }}
 roq_b_matrix_directory={{ roqdir }}
 
@@ -60,6 +58,7 @@ events=all
 analyse-all-time=False
 timeslides=False
 ignore-gracedb-psd=True
+threshold-snr=3
 
 
 [condor]
@@ -68,13 +67,43 @@ ignore-gracedb-psd=True
 {{ path.name }}={{ path.path }}
 {% endfor %}
 
+# When you start a run manually based on this ini file, delete the above
+# executable paths and specify the paths to your own executables with the
+# following scripts.
+#
+# lalsuite-install=/home/albert.einstein/opt/lalsuite/
+# datafind=%(lalsuite-install)s/bin/gw_data_find
+# mergeNSscript=%(lalsuite-install)s/bin/lalinference_nest2pos
+# mergeMCMCscript=%(lalsuite-install)s/bin/cbcBayesMCMC2pos
+# combinePTMCMCh5script=%(lalsuite-install)s/bin/cbcBayesCombinePTMCMCh5s
+# resultspage=%(lalsuite-install)s/bin/summarypages
+# segfind=%(lalsuite-install)s/bin/ligolw_segment_query
+# ligolw_print=%(lalsuite-install)s/bin/ligolw_print
+# coherencetest=%(lalsuite-install)s/bin/lalinference_coherence_test
+# lalinferencenest=%(lalsuite-install)s/bin/lalinference_nest
+# lalinferencemcmc=%(lalsuite-install)s/bin/lalinference_mcmc
+# lalinferencebambi=%(lalsuite-install)s/bin/lalinference_bambi
+# lalinferencedatadump=%(lalsuite-install)s/bin/lalinference_datadump
+# ligo-skymap-from-samples=%(lalsuite-install)s/bin/ligo-skymap-from-samples
+# ligo-skymap-plot=%(lalsuite-install)s/bin/ligo-skymap-plot
+# processareas=%(lalsuite-install)s/bin/process_areas
+# computeroqweights=%(lalsuite-install)s/bin/lalinference_compute_roq_weights
+# mpiwrapper=%(lalsuite-install)s/bin/lalinference_mpi_wrapper
+# gracedb=%(lalsuite-install)s/bin/gracedb
+# ppanalysis=%(lalsuite-install)s/bin/cbcBayesPPAnalysis
+# pos_to_sim_inspiral=%(lalsuite-install)s/bin/cbcBayesPosToSimInspiral
+
 mpirun=mpirun
-accounting_group=ligo.dev.o3.cbc.pe.lalinference
+accounting_group={{ accounting_group  }}
+# Remove the following line when you start a run manually based on this ini
+# file.
 accounting_group_user=soichiro.morisaki
 
 
 [datafind]
 url-type=file
+# Use types = {'H1': 'H1_HOFT_C00', 'L1': 'L1_HOFT_C00', 'V1': 'V1Online'} when
+# you start a run manually.
 types = {{ types | safe }}
 
 
@@ -97,18 +126,72 @@ ntemps=8
 resume=
 adapt-temps=
 progress=
-# The following calibration uncertainties are from
-# https://wiki.ligo.org/LSC/JRPComm/O3PreparationER13
-enable-spline-calibration=
-H1-spcal-amp-uncertainty=0.05
-L1-spcal-amp-uncertainty=0.1
-V1-spcal-amp-uncertainty=0.15
-H1-spcal-phase-uncertainty=3
-L1-spcal-phase-uncertainty=6
-V1-spcal-phase-uncertainty=3
+spcal-nodes = 10
+enable-spline-calibration =
+H1-spcal-envelope = {{ h1_calibration }}
+L1-spcal-envelope = {{ l1_calibration }}
+V1-spcal-envelope = {{ v1_calibration }}
 {{ margphi }}
-{{ disable_spin }}
-{{ zeroLogLike }}
+# You can use your own PSDs by specifying their paths.
+# H1-psd=
+# L1-psd=
+# V1-psd=
+
+
+# Priors
+# For all parameters known to lalinference, the min and max default prior can be overwritten with
+# parname-min=MIN
+# parname-max=MAX
+
+# The starting point for the MCMC chain(s) can be specified with
+# parname=START
+
+# Parameters can be fixed to some value with
+# fix-parname=FIXVALUE
+
+# currently known parameters, together with default [min-max] are (radians for angle, Mpc for distance, Msun for masses)
+
+# time                         Waveform time [trigtime-0.1-trigtime+0.1]
+# chirpmass                    Chirpmass [1,15.3]
+# eta                          Symmetric massratio (needs --use-eta) [0,0.0312]
+# q                            Asymmetric massratio (a.k.a. q=m2/m1 with m1>m2) [0.033,1]
+# phase                        Coalescence phase [0,2Pi]
+# costheta_jn                  Cosine of angle between J and line of sight [-1,1]
+# logdistance                  Log Distance [log(1),log(2000)]
+# rightascension               Rightascension [0,2Pi]
+# declination                  Declination [-Pi/2,Pi/2]
+# polarisation                 Polarisation angle [0,Pi]
+
+# Spin Parameters:
+# a_spin1                      Spin1 magnitude [-1,1] for aligned, [0,1] for precessing
+# a_spin2                      Spin2 magnitude [-1,1] for aligned, [0,1] for precessing
+# tilt_spin1                   Angle between spin1 and orbital angular momentum [0,Pi]
+# tilt_spin2                   Angle between spin2 and orbital angular momentum  [0, Pi]
+# phi_12                       Difference between spins' azimuthal angles [0,2Pi]
+# phi_jl                       Difference between total and orbital angular momentum azimuthal angles [0,2Pi]
+
+# Tidal parameters (requires tidal= or tidalT=):
+# lambda1                      lambda1 [0,3000]
+# lambda2                      lambda2 [0,3000]
+# lambdaT                      lambdaT [0,3000]
+# dLambdaT                     dLambdaT [-500,500]
+
+# Equation of State parameters (requires 4PolyEOS=):
+# logp1                        logp1 [33.6,35.4]
+# gamma1                       gamma1 [2.0,4.5]
+# gamma2                       gamma2 [1.1,4.5]
+# gamma3                       gamma3 [1.1,4.5]
+
+# Settings for allowed component masses in Solar Masses, with default values
+# comp-max=30.0
+# comp-min=1.0
+
+# Allowed total masses in Msun (note, used together with component masses, mc,q,eta priors may lead to inconsistencies. Be careful!)
+# mtotal-max=35
+# mtotal-min=2
+
+# Setting time prior [seconds]
+# dt=0.1
 
 
 [mpi]

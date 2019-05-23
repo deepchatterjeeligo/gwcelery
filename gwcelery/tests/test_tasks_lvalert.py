@@ -23,27 +23,6 @@ def netrc_lvalert(tmpdir):
         yield
 
 
-@patch('sleek_lvalert.LVAlertClient')
-@patch('gwcelery.tasks.lvalert.listen.is_aborted', side_effect=[False, True])
-def test_listen(mock_is_aborted, mock_client, netrc_lvalert):
-    client_instance = mock_client.return_value
-    client_instance.get_subscriptions.return_value = ['superevent']
-
-    # Run function under test
-    lvalert.listen()
-
-    mock_client.assert_called_once()
-    client_instance.connect.assert_called_once_with()
-    client_instance.process.assert_called_once_with(block=False)
-    client_instance.subscribe.assert_called_once()
-    # In our test scenario, we were already subscribed to 'superevent',
-    # but not to 'cbc_gstlal'.
-    assert 'superevent' not in client_instance.subscribe.call_args[0]
-    assert 'cbc_gstlal' in client_instance.subscribe.call_args[0]
-    client_instance.listen.assert_called_once_with(lvalert.handler.dispatch)
-    client_instance.abort.assert_called_once_with()
-
-
 @pytest.fixture
 def fake_lvalert():
     with pkg_resources.resource_stream(__name__, 'data/lvalert_xmpp.xml') as f:
@@ -64,7 +43,7 @@ def fake_lvalert():
 def test_handle_messages(mock_superevents_handle, mock_get_event,
                          netrc_lvalert, fake_lvalert):
     """Test handling an LVAlert message that originates from the configured
-    GraceDb server."""
+    GraceDB server."""
     node, payload = fake_lvalert
 
     # Manipulate alert content
@@ -81,8 +60,8 @@ def test_handle_messages(mock_superevents_handle, mock_get_event,
 @patch('gwcelery.tasks.superevents.handle.run')
 def test_handle_messages_wrong_server(mock_superevents_handle,
                                       netrc_lvalert, fake_lvalert, caplog):
-    """Test handling an LVAlert message that originates from a GraceDb server
-    other than the configured GraceDb server. It should be ignored."""
+    """Test handling an LVAlert message that originates from a GraceDB server
+    other than the configured GraceDB server. It should be ignored."""
     node, payload = fake_lvalert
 
     # Manipulate alert content
@@ -96,7 +75,7 @@ def test_handle_messages_wrong_server(mock_superevents_handle,
     lvalert.handler.dispatch(node, payload)
     record, *_ = caplog.records
     assert record.message == ('ignoring LVAlert message because it is '
-                              'intended for GraceDb server '
+                              'intended for GraceDB server '
                               'https://gracedb2.invalid/api/, but we are set '
                               'up for server https://gracedb.invalid/api/')
     mock_superevents_handle.assert_not_called()
@@ -105,7 +84,7 @@ def test_handle_messages_wrong_server(mock_superevents_handle,
 @patch('gwcelery.tasks.superevents.handle.run')
 def test_handle_messages_no_self_link(mock_superevents_handle,
                                       netrc_lvalert, fake_lvalert, caplog):
-    """Test handling an LVAlert message that does not identify the GraceDb
+    """Test handling an LVAlert message that does not identify the GraceDB
     server of origin. It should be rejected."""
     node, payload = fake_lvalert
 

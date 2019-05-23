@@ -37,6 +37,7 @@ sys.path.insert(0, os.path.abspath('..'))
 # ones.
 extensions = [
     'celery.contrib.sphinx',
+    'matplotlib.sphinxext.plot_directive',
     'sphinx.ext.autodoc',
     'sphinx.ext.autosectionlabel',
     'sphinx.ext.graphviz',
@@ -66,8 +67,6 @@ description = setup_cfg['metadata']['description']
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
 # built documents.
-#
-# The short X.Y version.
 
 spec = importlib.util.spec_from_file_location(
     '_version', '../gwcelery/_version.py')
@@ -76,6 +75,7 @@ spec.loader.exec_module(module)
 parsed_version = pkg_resources.parse_version(module.get_versions()['version'])
 del module, spec
 
+# The short X.Y version.
 version = parsed_version.base_version
 # The full version, including alpha/beta/rc tags.
 release = parsed_version.public
@@ -102,7 +102,10 @@ todo_include_todos = False
 
 autodoc_mock_imports = []
 for mod in ['astropy',
+            'click',
             'comet',
+            'flask',
+            'flask_caching',
             'gcn',
             'glue',
             'gwdatafind',
@@ -130,12 +133,13 @@ for mod in ['astropy',
             'lxml.etree',
             'matplotlib',
             'numpy',
+            'pytest',
             'safe_netrc',
             'scipy',
             'sentry_sdk',
             'sleek_lvalert',
             'twisted',
-            'pytest',
+            'werkzeug',
             'zope']:
     try:
         importlib.import_module(mod)
@@ -165,7 +169,8 @@ html_theme_options = {
     'description': description,
     'github_button': False,
     'logo': 'logo.png',
-    'logo_name': True
+    'logo_name': True,
+    'show_relbars': True
 }
 
 # Add any paths that contain custom static files (such as style sheets) here,
@@ -252,8 +257,6 @@ texinfo_documents = [
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3', None),
     'celery': ('https://celery.readthedocs.io/en/latest/', None),
-    'celery_eternal': ('https://celery-eternal.readthedocs.io/en/latest/',
-                       None),
     'comet': ('https://comet.readthedocs.io/en/stable/', None),
     'data-quality-report': (
         'https://docs.ligo.org/detchar/data-quality-report/', None),

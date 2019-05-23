@@ -1,14 +1,12 @@
 """Module containing the functionality for creation and management of
 superevents.
 
-    * There is serial processing of triggers from low latency
-      pipelines.
-    * Dedicated **superevent** queue for this purpose.
-    * Primary logic to respond to low latency triggers contained
-      in :meth:`handle` function.
+*   There is serial processing of triggers from low latency pipelines.
+*   Dedicated **superevent** queue for this purpose.
+*   Primary logic to respond to low latency triggers contained in
+    :meth:`handle` function.
 """
 from celery.utils.log import get_task_logger
-from ligo.gracedb.exceptions import HTTPError
 from ligo.segments import segment, segmentlist
 
 from ..import app
@@ -23,20 +21,14 @@ log = get_task_logger(__name__)
                  'cbc_mbtaonline',
                  'burst_olib',
                  'burst_cwb',
-                 'test_gstlal',
-                 'test_pycbc',
-                 'test_mbtaonline',
                  queue='superevent',
                  shared=False)
 def handle(payload):
     """LVAlert handler for superevent manager.
-    Recieves payload from test and production nodes and
-    serially processes them to create/modify superevents
-    """
-    alert_type = payload['alert_type']
 
-    if alert_type != 'new':
-        log.info('Not new type alert, passing...')
+    Receives payload from test and production nodes and serially processes them
+    to create/modify superevents."""
+    if payload['alert_type'] != 'new':
         return
 
     gid = payload['uid']
@@ -52,9 +44,9 @@ def handle(payload):
             log.info("Skipping processing of %s because of low FAR", gid)
             return
 
-    event_info = _get_event_info(payload)
+    event_info = payload['object']
 
-    if event_info['search'] == 'MDC':
+    if event_info.get('search') == 'MDC':
         category = 'mdc'
     elif event_info['group'] == 'Test':
         category = 'test'
@@ -73,29 +65,25 @@ def handle(payload):
     else:
         sid = None  # No matching superevent
 
-    d_t_start, d_t_end = _get_dts(event_info)
+    t_0, t_start, t_end = get_ts(event_info)
 
     if sid is None:
         log.debug('Entered 1st if')
         event_segment = _Event(event_info['gpstime'],
-                               event_info['gpstime'] - d_t_start,
-                               event_info['gpstime'] + d_t_end,
+                               t_start, t_end,
                                event_info['graceid'],
                                event_info['group'],
                                event_info['pipeline'],
-                               event_info['search'],
-                               event_dict=payload)
+                               event_info.get('search'),
+                               event_dict=event_info)
 
         superevent = _partially_intersects(superevents, event_segment)
 
         if not superevent:
-            log.info('New event %s with no superevent in GraceDb, '
+            log.info('New event %s with no superevent in GraceDB, '
                      'creating new superevent', gid)
             gracedb.create_superevent(event_info['graceid'],
-                                      event_info['gpstime'],
-                                      d_t_start,
-                                      d_t_end,
-                                      category)
+                                      t_0, t_start, t_end, category)
             return
 
         log.info('Event %s in window of %s. Adding event to superevent',
@@ -114,108 +102,200 @@ def handle(payload):
             log.info("%s is completely contained in %s",
                      event_segment.gid, superevent.superevent_id)
             new_t_start = new_t_end = None
-        # FIXME handle the 400 properly when arises
-        try:
-            _update_superevent(superevent.superevent_id,
-                               superevent.preferred_event,
-                               event_info,
-                               t_start=new_t_start,
-                               t_end=new_t_end)
-        except HTTPError as err:
-            if err.status == 400 and err.reason == "Bad Request":
-                log.exception("Server returned bad request")
-            else:
-                raise err
-
+        _update_superevent(superevent.superevent_id,
+                           superevent.preferred_event,
+                           event_info,
+                           t_0=t_0,
+                           t_start=new_t_start,
+                           t_end=new_t_end)
     else:
         log.critical('Superevent %s exists for alert_type new for %s',
                      sid, gid)
 
 
-def _get_event_info(payload):
-    """Helper function to fetch required event info (from GraceDb)
-    at once and reduce polling
-    """
-    # pull basic info
-    alert_type = payload.get('alert_type')
-    payload = payload.get('object', payload)
-    event_info = dict(
-        graceid=payload['graceid'],
-        gpstime=payload['gpstime'],
-        far=payload['far'],
-        instruments=payload['instruments'],
-        group=payload['group'],
-        pipeline=payload['pipeline'],
-        search=payload.get('search'),
-        alert_type=alert_type)
-    # pull pipeline based extra attributes
-    if payload['group'].lower() == 'cbc':
-        event_info['snr'] = \
-             payload['extra_attributes']['CoincInspiral']['snr']
-    if payload['pipeline'].lower() == 'cwb':
-        extra_attributes = ['duration', 'start_time', 'snr']
-        event_info.update(
-            {attr:
-             payload['extra_attributes']['MultiBurst'][attr]
-             for attr in extra_attributes})
-    elif payload['pipeline'].lower() == 'olib':
-        extra_attributes = ['quality_mean', 'frequency_mean']
-        event_info.update(
-            {attr:
-             payload['extra_attributes']['LalInferenceBurst'][attr]
-             for attr in extra_attributes})
-        # oLIB snr key has a different name, call it snr
-        event_info['snr'] = \
-            payload[
-                'extra_attributes']['LalInferenceBurst']['omicron_snr_network']
-    return event_info
+def get_ts(event):
+    """Get time extent of an event, depending on pipeline-specific parameters.
 
+    *   For CWB, use the event's ``duration`` field.
+    *   For oLIB, use the ratio of the event's ``quality_mean`` and
+        ``frequency_mean`` fields.
+    *   For all other pipelines, use the
+        :obj:`~gwcelery.conf.superevent_d_t_start` and
+        :obj:`~gwcelery.conf.superevent_d_t_start` configuration values.
 
-def _get_dts(event_info):
+    Parameters
+    ----------
+    event : dict
+        Event dictionary (e.g., the return value from
+        :meth:`gwcelery.tasks.gracedb.get_event`).
+
+    Returns
+    -------
+    t_0: float
+        Segment center time in GPS seconds.
+    t_start : float
+        Segment start time in GPS seconds.
+
+    t_end : float
+        Segment end time in GPS seconds.
     """
-    Returns the d_t_start and d_t_end values based on CBC/Burst
-    type alerts
-    """
-    pipeline = event_info['pipeline'].lower()
+    pipeline = event['pipeline'].lower()
     if pipeline == 'cwb':
-        d_t_start = d_t_end = event_info['duration']
+        attribs = event['extra_attributes']['MultiBurst']
+        d_t_start = d_t_end = attribs['duration']
     elif pipeline == 'olib':
-        d_t_start = d_t_end = (event_info['quality_mean'] /
-                               event_info['frequency_mean'])
+        attribs = event['extra_attributes']['LalInferenceBurst']
+        d_t_start = d_t_end = (attribs['quality_mean'] /
+                               attribs['frequency_mean'])
     else:
         d_t_start = app.conf['superevent_d_t_start'].get(
             pipeline, app.conf['superevent_default_d_t_start'])
         d_t_end = app.conf['superevent_d_t_end'].get(
             pipeline, app.conf['superevent_default_d_t_end'])
-    return d_t_start, d_t_end
+    return (event['gpstime'], event['gpstime'] - d_t_start,
+            event['gpstime'] + d_t_end)
 
 
-def _keyfunc(event_info):
-    group = event_info['group'].lower()
-    num_ifos = len(event_info['instruments'].split(","))
-    ifo_rank = (num_ifos <= 1)
+def get_snr(event):
+    """Get the SNR from the LVAlert packet.
+
+    Different groups and pipelines store the SNR in different fields.
+
+    Parameters
+    ----------
+    event : dict
+        Event dictionary (e.g., the return value from
+        :meth:`gwcelery.tasks.gracedb.get_event`).
+
+    Returns
+    -------
+    snr : float
+        The SNR.
+    """
+    group = event['group'].lower()
+    pipeline = event['pipeline'].lower()
+    if group == 'cbc':
+        attribs = event['extra_attributes']['CoincInspiral']
+        return attribs['snr']
+    elif pipeline == 'cwb':
+        attribs = event['extra_attributes']['MultiBurst']
+        return attribs['snr']
+    elif pipeline == 'olib':
+        attribs = event['extra_attributes']['LalInferenceBurst']
+        return attribs['omicron_snr_network']
+    else:
+        raise NotImplementedError('SNR attribute not found')
+
+
+def get_instruments(event):
+    """Get the participating instruments from the LVAlert packet.
+
+    Parameters
+    ----------
+    event : dict
+        Event dictionary (e.g., the return value from
+        :meth:`gwcelery.tasks.gracedb.get_event`).
+
+    Returns
+    -------
+    set
+        The set of instruments that contributed to the ranking statistic for
+        the event.
+
+    Notes
+    -----
+    The number of instruments that contributed *data* to an event is given by
+    the ``instruments`` key of the GraceDB event JSON structure. However, some
+    pipelines (e.g. gstlal) have a distinction between which instruments
+    contributed *data* and which were considered in the *ranking* of the
+    candidate. For such pipelines, we infer which pipelines contributed to the
+    ranking by counting only the SingleInspiral records for which the chi
+    squared field is non-empty.
+    """
+    try:
+        attribs = event['extra_attributes']['SingleInspiral']
+        ifos = {single['ifo'] for single in attribs
+                if single.get('chisq') is not None}
+    except KeyError:
+        ifos = set(event['instruments'].split(','))
+    return ifos
+
+
+def should_publish(event):
+    """Determine whether an event should be published as a public alert.
+
+    All of the following conditions must be true for a public alert:
+
+    *   The event's ``offline`` flag is not set.
+    *   The event's significance was estimated using data from 2 or more
+        gravitational-wave detectors.
+    *   The event's false alarm rate, weighted by the group-specific trials
+        factor as specified by the
+        :obj:`~gwcelery.conf.preliminary_alert_trials_factor` configuration
+        setting, is less than or equal to
+        :obj:`~gwcelery.conf.preliminary_alert_far_threshold`.
+
+    Parameters
+    ----------
+    event : dict
+        Event dictionary (e.g., the return value from
+        :meth:`gwcelery.tasks.gracedb.get_event`).
+
+    Returns
+    -------
+    should_publish : bool
+        :obj:`True` if the event meets the criteria for a public alert or
+        :obj:`False` if it does not.
+    """
+    group = event['group'].lower()
+    trials_factor = app.conf['preliminary_alert_trials_factor'][group]
+    far_threshold = app.conf['preliminary_alert_far_threshold'][group]
+    far = trials_factor * event['far']
+    ifos = get_instruments(event)
+    num_ifos = len(ifos)
+    return not event['offline'] and num_ifos > 1 and far <= far_threshold
+
+
+def keyfunc(event):
+    """Key function for selection of the preferred event.
+
+    Return a value suitable for identifying the preferred event. Given events
+    ``a`` and ``b``, ``a`` is preferred over ``b`` if
+    ``keyfunc(a) < keyfunc(b)``, else ``b`` is preferred.
+
+    Parameters
+    ----------
+    event : dict
+        Event dictionary (e.g., the return value from
+        :meth:`gwcelery.tasks.gracedb.get_event`).
+
+    Returns
+    -------
+    key : tuple
+        The comparison key.
+
+    Notes
+    -----
+    Tuples are compared lexicographically in Python: they are compared
+    element-wise until an unequal pair of elements is found.
+    """
+    group = event['group'].lower()
     try:
         group_rank = ['cbc', 'burst'].index(group)
     except ValueError:
         group_rank = float('inf')
-    # return the index of group and negative snr in spirit
-    # of rank being lower for higher SNR for CBC
-    if group == 'cbc':
-        return ifo_rank, group_rank, -1.0*event_info['snr']
-    else:
-        return ifo_rank, group_rank, event_info['far']
+    tie_breaker = -get_snr(event) if group == 'cbc' else event['far']
+    return not should_publish(event), group_rank, tie_breaker
 
 
 def _update_superevent(superevent_id, preferred_event, new_event_dict,
-                       t_start, t_end):
+                       t_0, t_start, t_end):
     """
-    Update preferred event and/or change time window.
-    Events with multiple detectors take precedence over
-    single-detector events, then CBC events take precedence
-    over burst events, and any remaining tie is broken by SNR/FAR
-    values for CBC/Burst. Single detector are not promoted
-    to preferred event status, if existing preferred event is
-    multi-detector
+    Update preferred event and/or change time window. Events with multiple
+    detectors take precedence over single-detector events, then CBC events take
+    precedence over burst events, and any remaining tie is broken by SNR/FAR
+    values for CBC/Burst. Single detector are not promoted to preferred event
+    status, if existing preferred event is multi-detector
 
     Parameters
     ----------
@@ -225,19 +305,22 @@ def _update_superevent(superevent_id, preferred_event, new_event_dict,
         preferred event id of the superevent
     new_event_dict : dict
         event info of the new trigger as a dictionary
+    t_0 : float
+        center time of `superevent_id`, None for no change
     t_start : float
         start time of `superevent_id`, None for no change
     t_end : float
         end time of `superevent_id`, None for no change
     """
-    preferred_event_dict = _get_event_info(gracedb.get_event(preferred_event))
+    preferred_event_dict = gracedb.get_event(preferred_event)
 
     kwargs = {}
     if t_start is not None:
         kwargs['t_start'] = t_start
     if t_end is not None:
         kwargs['t_end'] = t_end
-    if _keyfunc(new_event_dict) < _keyfunc(preferred_event_dict):
+    if keyfunc(new_event_dict) < keyfunc(preferred_event_dict):
+        kwargs['t_0'] = t_0
         kwargs['preferred_event'] = new_event_dict['graceid']
 
     if kwargs:
@@ -245,15 +328,14 @@ def _update_superevent(superevent_id, preferred_event, new_event_dict,
 
 
 def _superevent_segment_list(superevents):
-    """Ingests a list of superevent dictionaries, and returns
-    a segmentlist with start and end times as the duration of
-    each segment
+    """Ingests a list of superevent dictionaries, and returns a segmentlist
+    with start and end times as the duration of each segment.
 
     Parameters
     ----------
     superevents : list
-        list of superevent dictionaries, usually fetched by
-        :meth:`GraceDb.superevents()`.
+        List of superevent dictionaries (e.g., the return value from
+        :meth:`gwcelery.tasks.gracedb.get_superevents`).
 
     Returns
     -------
@@ -270,11 +352,9 @@ def _superevent_segment_list(superevents):
 
 
 def _partially_intersects(superevents, event_segment):
-    """Similar to :meth:`segmentlist.find`
-    except it also returns the segment of
-    `superevents` which partially intersects argument.
-    If there are more than one intersections,
-    first occurence is returned.
+    """Similar to :meth:`segmentlist.find` except it also returns the segment
+    of `superevents` which partially intersects argument. If there are more
+    than one intersections, first occurence is returned.
 
     Parameters
     ----------
@@ -298,9 +378,7 @@ def _partially_intersects(superevents, event_segment):
 
 
 class _Event(segment):
-    """An event implemented as an extension of
-    :class:`segment`
-    """
+    """An event implemented as an extension of :class:`segment`."""
     def __new__(cls, t0, t_start, t_end, *args, **kwargs):
         return super().__new__(cls, t_start, t_end)
 
@@ -315,9 +393,7 @@ class _Event(segment):
 
 
 class _SuperEvent(segment):
-    """An superevent implemented as an extension of
-    :class:`segment`
-    """
+    """An superevent implemented as an extension of :class:`segment`."""
     def __new__(cls, t_start, t_end, *args, **kwargs):
         return super().__new__(cls, t_start, t_end)
 

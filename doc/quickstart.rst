@@ -9,12 +9,7 @@ testing on any machine.
 To install
 ----------
 
-.. important::
-   GWCelery requires Python 3.6; it does not work with Python 3.7 right now.
-
-   There is a `bug in the Celery 4.2.1`_ that makes it incompatible with Python
-   3.7. It has already been fixed upstream, but it will continue to affect us
-   `until Celery 4.3 is released`_.
+GWCelery requires Python >= 3.6.
 
 The easiest way to install it is with ``venv`` and ``pip``::
 
@@ -32,9 +27,6 @@ The easiest way to install it is with ``venv`` and ``pip``::
 
    then run ``pip install --upgrade setuptools`` and try again.
 
-.. _`bug in the Celery 4.2.1`: https://github.com/celery/celery/pull/4852
-.. _`until Celery 4.3 is released`: https://github.com/celery/celery/issues/5180
-
 To test
 -------
 
@@ -45,14 +37,14 @@ With ``setup.py``::
 To start
 --------
 
-Before starting GWCelery, you need to authenticate for access to GraceDb and
+Before starting GWCelery, you need to authenticate for access to GraceDB and
 LVAlert and make sure that you have a Redis server running. Once you have
 completed those steps, you can start each of the GWCelery manually.
 
 Authentication
 ~~~~~~~~~~~~~~
 
-To authenticate for GraceDb, obtain grid credentials from the `LSC
+To authenticate for GraceDB, obtain grid credentials from the `LSC
 DataGrid Client`_ by running ``ligo-proxy-init``::
 
     $ ligo-proxy-init albert.einstein
@@ -112,7 +104,7 @@ GWCelery itself consists of five :ref:`Celery workers <celery:guide-workers>`
 and one `Flask`_ web application. Start them all by running each of the
 following commands::
 
-    $ gwcelery worker -l info -n gwcelery-worker -Q celery -B
+    $ gwcelery worker -l info -n gwcelery-worker -Q celery -B --lvalert
     $ gwcelery worker -l info -n gwcelery-exttrig-worker -Q exttrig -c 1
     $ gwcelery worker -l info -n gwcelery-openmp-worker -Q openmp -c 1
     $ gwcelery worker -l info -n gwcelery-superevent-worker -Q superevent -c 1

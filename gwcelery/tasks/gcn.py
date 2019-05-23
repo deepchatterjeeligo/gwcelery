@@ -90,22 +90,33 @@ def send(self, message):
         connected to the VOEvent broadcaster.
     """
     broadcasters = self.app.conf['voevent_broadcaster_factory'].broadcasters
-    if not broadcasters:
+    if broadcasters:
+        event = xml_document(message)
+        for broadcaster in broadcasters:
+            reactor.callFromThread(broadcaster.send_event, event)
+    elif self.app.conf['voevent_broadcaster_whitelist']:
         raise SendingError('Not sending the event because there are no '
                            'subscribers connected to the GCN broker.')
-    event = xml_document(message)
-    for broadcaster in broadcasters:
-        reactor.callFromThread(broadcaster.send_event, event)
 
 
 @handler(gcn.NoticeType.LVC_PRELIMINARY,
          gcn.NoticeType.LVC_INITIAL,
          gcn.NoticeType.LVC_UPDATE,
          gcn.NoticeType.LVC_RETRACTION,
-         shared=False)
-def validate(payload):
+         bind=True, shared=False)
+def validate(self, payload):
     """Check that the contents of a public LIGO/Virgo GCN matches the original
-    VOEvent in GraceDB."""
+    VOEvent in GraceDB.
+
+    Notes
+    -----
+    If the VOEvent broadcaster is disabled by setting
+    :obj:`~gwcelery.conf.voevent_broadcaster_whitelist` to an empty list, then
+    this task becomes a no-op."""
+
+    if not self.app.conf['voevent_broadcaster_whitelist']:
+        return
+
     root = lxml.etree.fromstring(payload)
 
     # Which GraceDB ID does this refer to?

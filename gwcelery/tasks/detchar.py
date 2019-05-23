@@ -94,39 +94,6 @@ virgo_state_vector_bits = Bits(
 """State vector bitfield definitions for Virgo."""
 
 
-no_dq_veto_mbta_bits = Bits(
-    channel='V1:DQ_VETO_MBTA',
-    bits={0: 'NO_DQ_VETO_MBTA'},
-    description={'NO_DQ_VETO_MBTA': 'NO DQ veto for MBTA'}
-                           )
-
-no_dq_veto_cwb_bits = Bits(
-    channel='V1:DQ_VETO_CWB', bits={0: 'NO_DQ_VETO_CWB'},
-    description={'NO_DQ_VETO_CWB': 'NO DQ veto for cWB'}
-                          )
-
-no_dq_veto_gstlal_bits = Bits(
-    channel='V1:DQ_VETO_GSTLAL', bits={0: 'NO_DQ_VETO_GSTLAL'},
-    description={'NO_DQ_VETO_GSTLAL': 'NO DQ veto for gstLAL'}
-                             )
-
-no_dq_veto_olib_bits = Bits(
-    channel='V1:DQ_VETO_OLIB', bits={0: 'NO_DQ_VETO_OLIB'},
-    description={'NO_DQ_VETO_OLIB': 'NO DQ veto for oLIB'}
-                           )
-
-no_dq_veto_pycbc_bits = Bits(
-    channel='V1:DQ_VETO_PYCBC',
-    bits={0: 'NO_DQ_VETO_PYCBC'},
-    description={'NO_DQ_VETO_PYCBC': 'NO DQ veto for pyCBC'}
-                            )
-"""No DQ veto stream bitfield definitions for Virgo.
-NOTE: Since the results for these bits will be NOT()ed, the bit
-definitions are the NO_* versions of what the bit * actually is.
-This is an inelegant but the simplest solution since the logic used in these
-channels are opposite to those in all the other checked channels."""
-
-
 def create_cache(ifo, start, end):
     """Find .gwf files and create cache. Will first look in the llhoft, and
     if the frames have expired from llhoft, will call gwdatafind.
@@ -162,9 +129,20 @@ def create_cache(ifo, start, end):
         log.exception('Files do not exist in llhoft_glob')
         return cache  # returns empty cache
     if start < cache_starttime:  # required data has left llhoft
-        urls = find_urls(ifo[0], '{}1_HOFT_C00'.format(ifo[0]), start, end)
-        cache = Cache.from_urls(urls)
-    return cache
+        high_latency = app.conf['high_latency_frame_types'][ifo]
+        urls = find_urls(ifo[0], high_latency, start, end)
+        if len(urls) != 0:
+            return Cache.from_urls(urls)
+        else:  # required data not in high latency frames
+            low_latency = app.conf['low_latency_frame_types'][ifo]
+            urls = find_urls(ifo[0], low_latency, start, end)
+            if len(urls) != 0:
+                return Cache.from_urls(urls)
+            else:  # required data not in low latency frames
+                error_msg = "This data cannot be found, or does not exist."
+                log.exception(error_msg)
+    else:
+        return cache
 
 
 def generate_table(title, high_bit_list, low_bit_list, unknown_bit_list):
@@ -270,7 +248,7 @@ def check_idq(cache, channel, start, end):
         log.exception('Failed to read from low-latency iDQ frame files')
         return (channel, None)
     else:
-        return (channel, getattr(idq_prob, 'max')())
+        return (channel, float(idq_prob.max()))
 
 
 def check_vector(cache, channel, start, end, bits, logic_type='all'):
@@ -331,7 +309,7 @@ def check_vector(cache, channel, start, end, bits, logic_type='all'):
 @app.task(shared=False)
 def check_vectors(event, graceid, start, end):
     """Perform data quality checks for an event and labels/logs results to
-    GraceDb.
+    GraceDB.
 
     Depending on the pipeline, a certain amount of time (specified in
     :obj:`~gwcelery.conf.check_vector_prepost`) is appended to either side of
@@ -343,15 +321,15 @@ def check_vectors(event, graceid, start, end):
     involved in the event. Then, the bits and channels specified in the
     configuration file (:obj:`~gwcelery.conf.llhoft_channels`) are checked.
     If an injection is found in the active detectors, 'INJ' is labeled to
-    GraceDb. If an injection is found in any detector, a message with the
-    injection found is logged to GraceDb. If no injections are found across
-    all detectors, this is logged to GraceDb.
+    GraceDB. If an injection is found in any detector, a message with the
+    injection found is logged to GraceDB. If no injections are found across
+    all detectors, this is logged to GraceDB.
 
     A similar task is performed for the DQ states described in the
     DMT-DQ_VECTOR, LIGO GDS-CALIB_STATE_VECTOR, and Virgo
     DQ_ANALYSIS_STATE_VECTOR. If no DQ issues are found in active detectors,
-    'DQOK' is labeled to GraceDb. Otherwise, 'DQV' is labeled. In all cases,
-    the DQ states of all the state vectors checked are logged to GraceDb.
+    'DQOK' is labeled to GraceDB. Otherwise, 'DQV' is labeled. In all cases,
+    the DQ states of all the state vectors checked are logged to GraceDB.
 
     This skips MDC events.
 
@@ -363,12 +341,28 @@ def check_vectors(event, graceid, start, end):
         GraceID of event to which to log.
     start, end : int or float
         GPS start and end times desired.
+
+    Returns
+    -------
+    event : dict
+        Details of the event, reflecting any labels that were added.
     """
     # Skip MDC events.
     if event.get('search') == 'MDC':
         log.info('Skipping state vector checks because %s is an MDC',
                  event['graceid'])
         return event
+
+    # Check the full template duration
+    pref_event = event.get('preferred_event')
+    if pref_event is not None:  # external events won't have preferred events
+        try:
+            template_dur = pref_event[
+                'extra_attributes']['SingleInspiral'][0]['template_duration']
+            start = start - template_dur
+        except KeyError:
+            # preferred event is a burst or has no template duration
+            pass
 
     # Create caches for all detectors
     instruments = event['instruments'].split(',')
@@ -392,9 +386,6 @@ def check_vectors(event, graceid, start, end):
     for channel, bits in analysis_channels:
         states.update(check_vector(caches[channel.split(':')[0]], channel,
                                    start, end, globals()[bits]))
-        #  Hard coded not() of Virgo DQ_VETO_* streams
-        states.update({key: not(value) for key, value in states.items()
-                       if key[:10] == 'V1:DQ_VETO'})
     # Pick out DQ and injection states, then filter for active detectors
     dq_states = {key: value for key, value in states.items()
                  if key.split('_')[-1] != 'INJ'}
@@ -410,39 +401,58 @@ def check_vectors(event, graceid, start, end):
                                channel, start, end)
                      for channel in app.conf['idq_channels'])
 
-    # Logging iDQ to GraceDb
+    # Logging iDQ to GraceDB
     if None not in idq_probs.values():
         if max(idq_probs.values()) >= app.conf['idq_pglitch_thresh']:
-            idq_msg = "iDQ glitch probability is high: {}. ".format(
-                json.dumps(idq_probs)[2:-1])
+            idq_probs_readable = {k: round(v, 3) for k, v in idq_probs.items()}
+            idq_msg = ("iDQ glitch probability is high: "
+                       "maximum p(glitch) is {}. ").format(
+                json.dumps(idq_probs_readable)[1:-1])
             # If iDQ p(glitch) is high and pipeline enabled, apply DQV
             if app.conf['idq_veto'][pipeline]:
+                gracedb.remove_label('DQOK', graceid)
                 gracedb.create_label('DQV', graceid)
+                # Add labels to return value to avoid querying GraceDB again.
+                event = dict(event, labels=event.get('labels', []) + ['DQV'])
+                try:
+                    event['labels'].remove('DQOK')
+                except ValueError:  # not in list
+                    pass
         else:
-            idq_msg = ("iDQ glitch probabilities at both H1 and L1"
-                       " are good (below {}). ").format(
-                           app.conf['idq_pglitch_thresh'])
+            idq_msg = ("iDQ glitch probabilities at both H1 and L1 "
+                       "are good (below {} threshold). "
+                       "Maximum p(glitch) is {}. ").format(
+                           app.conf['idq_pglitch_thresh'],
+                           json.dumps(idq_probs)[1:-1])
     else:
         idq_msg = "iDQ glitch probabilities unknown. "
-    gracedb.client.writeLog(graceid, idq_msg + prepost_msg,
-                            tag_name=['data_quality'])
+    gracedb.upload.delay(
+        None, None, graceid, idq_msg + prepost_msg, ['data_quality'])
 
-    # Labeling INJ to GraceDb
+    # Labeling INJ to GraceDB
     if False in active_inj_states.values():
         # Label 'INJ' if injection found in active IFOs
         gracedb.create_label('INJ', graceid)
+        # Add labels to return value to avoid querying GraceDB again.
+        event = dict(event, labels=event.get('labels', []) + ['INJ'])
     if False in inj_states.values():
-        # Write all found injections into GraceDb log
+        # Write all found injections into GraceDB log
         injs = [k for k, v in inj_states.items() if v is False]
         inj_fmt = "Injection found.\n{}\n"
         inj_msg = inj_fmt.format(
             generate_table('Injection bits', [], injs, []))
     elif all(inj_states.values()) and len(inj_states.values()) > 0:
         inj_msg = 'No HW injections found. '
+        gracedb.remove_label('INJ', graceid)
+        event = dict(event, labels=list(event.get('labels', [])))
+        try:
+            event['labels'].remove('INJ')
+        except ValueError:  # not in list
+            pass
     else:
         inj_msg = 'Injection state unknown. '
-    gracedb.client.writeLog(graceid, inj_msg + prepost_msg,
-                            tag_name=['data_quality'])
+    gracedb.upload.delay(
+        None, None, graceid, inj_msg + prepost_msg, ['data_quality'])
 
     # Determining overall_dq_active_state
     if None in active_dq_states.values() or len(
@@ -466,15 +476,29 @@ def check_vectors(event, graceid, start, end):
     else:
         gate_msg = ''
 
-    # Labeling DQOK/DQV to GraceDb
-    gracedb.client.writeLog(
-        graceid, msg + prepost_msg + gate_msg, tag_name=['data_quality'])
+    # Labeling DQOK/DQV to GraceDB
+    gracedb.upload.delay(
+        None, None, graceid, msg + prepost_msg + gate_msg, ['data_quality'])
     if overall_dq_active_state is True:
         state = "pass"
+        gracedb.remove_label('DQV', graceid)
         gracedb.create_label('DQOK', graceid)
+        # Add labels to return value to avoid querying GraceDB again.
+        event = dict(event, labels=event.get('labels', []) + ['DQOK'])
+        try:
+            event['labels'].remove('DQV')
+        except ValueError:  # not in list
+            pass
     elif overall_dq_active_state is False:
         state = "fail"
+        gracedb.remove_label('DQOK', graceid)
         gracedb.create_label('DQV', graceid)
+        # Add labels to return value to avoid querying GraceDB again.
+        event = dict(event, labels=event.get('labels', []) + ['DQV'])
+        try:
+            event['labels'].remove('DQOK')
+        except ValueError:  # not in list
+            pass
     else:
         state = "unknown"
 
@@ -487,7 +511,7 @@ def check_vectors(event, graceid, start, end):
     file = dqr_json(json_state, state_summary)
     filename = 'gwcelerydetcharcheckvectors-{}.json'.format(graceid)
     message = "DQR-compatible json generated from check_vectors results"
-    gracedb.upload(
+    gracedb.upload.delay(
         json.dumps(file), filename, graceid, message)
 
     return event

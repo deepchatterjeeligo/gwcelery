@@ -27,24 +27,30 @@ task_serializer = 'pickle'
 
 # GWCelery-specific settings.
 
+expose_to_public = False
+"""Set to True if events meeting the public alert threshold really should be
+exposed to the public."""
+
 lvalert_host = 'lvalert-playground.cgca.uwm.edu'
 """LVAlert host."""
 
 gracedb_host = 'gracedb-playground.ligo.org'
-"""GraceDb host."""
+"""GraceDB host."""
 
 voevent_broadcaster_address = ':5342'
 """The VOEvent broker will bind to this address to send GCNs.
 This should be a string of the form `host:port`. If `host` is empty,
 then listen on all available interfaces."""
 
-voevent_broadcaster_whitelist = ['127.0.0.0/8']
+voevent_broadcaster_whitelist = []
 """List of hosts from which the broker will accept connections.
 If empty, then completely disable the broker's broadcast capability."""
 
-voevent_receiver_address = '68.169.57.253:8099'
-"""The VOEvent listener will connect to this address to receive GCNs.
-If empty, then completely disable the GCN listener."""
+voevent_receiver_address = ''
+"""The VOEvent listener will connect to this address to receive GCNs. For
+options, see `GCN's list of available VOEvent servers
+<https://gcn.gsfc.nasa.gov/voevent.html#tc2>`_. If this is an empty string,
+then completely disable the GCN listener."""
 
 superevent_d_t_start = {'gstlal': 1.0,
                         'spiir': 1.0,
@@ -81,19 +87,22 @@ preliminary_alert_far_threshold = {'cbc': 1 / (60 * 86400),
 """Group specific maximum false alarm rate to consider
 sending preliminary alerts."""
 
-preliminary_alert_trials_factor = dict(cbc=5.0, burst=5.0)
-"""Trials factor corresponding to trigger categories.
-For CBC, trials factor is the number of pipelines plus the external
-coincidence search. For Burst, this is the total number of searches
-plus the external coincidence search.
-CBC pipelines are gstlal, pycbc, mbtaonline, spiir.
-Burst searches are cwb.allsky, cwb.bbh, cwb.imbh and olib.allsky."""
+preliminary_alert_trials_factor = dict(cbc=5.0, burst=4.0)
+"""Trials factor corresponding to trigger categories. For CBC and Burst, trials
+factor is the number of pipelines. CBC pipelines are gstlal, pycbc, mbtaonline,
+spiir-highmass, spiir-lowmass. Burst searches are cwb.allsky, cwb.bbh, cwb.imbh
+and olib.allsky."""
 
-orchestrator_timeout = 15.0
+orchestrator_timeout = 300.0
 """The orchestrator will wait this many seconds from the time of the
 creation of a new superevent to the time that annotations begin, in order
 to let the superevent manager's decision on the preferred event
 stabilize."""
+
+pe_timeout = orchestrator_timeout + 45.0
+"""The orchestrator will wait this many seconds from the time of the
+creation of a new superevent to the time that parameter estimation begins, in
+case the preferred event is updated with high latency."""
 
 check_vector_prepost = {'gstlal': [2, 2],
                         'spiir': [2, 2],
@@ -132,14 +141,7 @@ llhoft_channels = {
     'L1:DMT-DQ_VECTOR': 'dmt_dq_vector_bits',
     'H1:GDS-CALIB_STATE_VECTOR': 'ligo_state_vector_bits',
     'L1:GDS-CALIB_STATE_VECTOR': 'ligo_state_vector_bits',
-    'V1:DQ_ANALYSIS_STATE_VECTOR': 'virgo_state_vector_bits',
-    #  Virgo DQ veto streams, should be implemented before September O2 replay
-    #  'V1:DQ_VETO_MBTA': 'no_dq_veto_mbta_bits',
-    #  'V1:DQ_VETO_CWB': 'no_dq_veto_cwb_bits',
-    #  'V1:DQ_VETO_GSTLAL': 'no_dq_veto_gstlal_bits',
-    #  'V1:DQ_VETO_OLIB': 'no_dq_veto_olib_bits',
-    #  'V1:DQ_VETO_PYCBC': 'no_dq_veto_pycbc_bits',
-                  }
+    'V1:DQ_ANALYSIS_STATE_VECTOR': 'virgo_state_vector_bits'}
 """Low-latency h(t) state vector configuration. This is a dictionary consisting
 of a channel and its bitmask, as defined in :mod:`gwcelery.tasks.detchar`."""
 
@@ -169,16 +171,28 @@ idq_veto = {'gstlal': False,
 Currently all False, pending iDQ review (should be done before O3).
 """
 
-p_astro_gstlal_ln_likelihood_threshold = 6
-"""log likelihood threshold"""
-
-p_astro_gstlal_ranking_pdf = '/home/gstlalcbc/observing/3/online/trigs/rankingstat_pdf.xml.gz'  # noqa: E501
+p_astro_livetime = 14394240
+"""livetime (units: sec) corresponding to mean values of Poisson counts.
+   (Used by :mod:`gwcelery.tasks.p_astro_other`)
+"""
 
 p_astro_url = \
     'http://emfollow.ldas.cit/data/H1L1V1-mean_counts-1126051217-61603201.json'
 """URL for mean values of Poisson counts using which p_astro
 is computed. (Used by :mod:`gwcelery.tasks.p_astro_gstlal` and
 :mod:`gwcelery.tasks.p_astro_other`)
+"""
+
+p_astro_weights_url = 'http://emfollow.ldas.cit/data/' \
+    'H1L1V1-weights-bins_686-1126051217-61603201.h5'
+"""URL for template weights using which p_astro
+is computed. (Used by :mod:`gwcelery.tasks.p_astro_gstlal`)
+"""
+
+p_astro_thresh_url = 'http://emfollow.ldas.cit/data/' \
+    'H1L1V1-pipeline-far_snr-thresholds.json'
+"""URL for pipeline thresholds on FAR and SNR.
+(Used by :mod:`gwcelery.tasks.p_astro_other`)
 """
 
 em_bright_url = 'http://emfollow.ldas.cit/data/em_bright_classifier.pickle'
@@ -189,15 +203,18 @@ classification is conducted. (Used by :mod:`gwcelery.tasks.em_bright`)
 low_latency_frame_types = {'H1': 'H1_O2_llhoft',
                            'L1': 'L1_O2_llhoft',
                            'V1': 'V1_O2_llhoft'}
-"""Types of frames used in Parameter Estimation with LALInference (see
-:mod:`gwcelery.tasks.lalinference`)"""
+"""Types of low latency frames used in Parameter Estimation with LALInference
+(see :mod:`gwcelery.tasks.lalinference`) and in cache creation for detchar
+checks (see :mod:`gwcelery.tasks.detchar`).
+"""
 
-high_latency_frame_types = {'H1': 'None',
-                            'L1': 'None',
-                            'V1': 'None'}
-"""Types of nonllhoft-frames used in Parameter Estimation with LALInference.
-They do not exist for O2Replay data. (see
-:mod:`gwcelery.tasks.lalinference`)"""
+high_latency_frame_types = {'H1': None,
+                            'L1': None,
+                            'V1': None}
+"""Types of high latency frames used in Parameter Estimation with LALInference
+and in cache creation for detchar checks. They do not exist for O2Replay data.
+(see :mod:`gwcelery.tasks.lalinference` and :mod:`gwcelery.tasks.detchar`)
+"""
 
 strain_channel_names = {'H1': 'H1:GDS-CALIB_STRAIN_O2Replay',
                         'L1': 'L1:GDS-CALIB_STRAIN_O2Replay',
@@ -211,10 +228,9 @@ state_vector_channel_names = {'H1': 'H1:GDS-CALIB_STATE_VECTOR',
 """Names of state vector channels used in Parameter Estimation with
 LALInference (see :mod:`gwcelery.tasks.lalinference`)"""
 
-pe_threshold = 1.0 / 3600
-"""FAR threshold in Hz for Parameter Estimation. That threshld is 1/ (3600
-seconds = 1 hour) for playground so that PE workflow can be tested
-frequently"""
+pe_threshold = 1.0 / (28 * 86400)
+"""FAR threshold in Hz for Parameter Estimation. PE group now applies
+1/(4 weeks) as a threshold. 86400 seconds = 1 day and 28 days = 4 weeks."""
 
 pe_results_path = os.path.join(os.getenv('HOME'), 'public_html/online_pe')
 """Path to the results of Parameter Estimation (see

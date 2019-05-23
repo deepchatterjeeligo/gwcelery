@@ -1,38 +1,34 @@
-import json
 import pytest
 from unittest.mock import patch
 
 from ..tasks import gracedb, superevents
 from . import resource_json
 
-lvalert_content = json.loads(
-    '''{
-    "object":
-        {
-            "graceid": "",
-            "gpstime": "",
-            "pipeline": "",
-            "group": "",
-            "created": "",
-            "far": "",
-            "instruments": "",
-            "labels": {},
-            "extra_attributes":{},
-            "submitter": "deep.chatterjee@ligo.org",
-            "offline": false
-        },
-    "alert_type": "new",
-    "uid": ""
-    }'''
-)
+lvalert_content = {
+    'object': {
+        'graceid': '',
+        'gpstime': '',
+        'pipeline': '',
+        'group': '',
+        'created': '',
+        'far': '',
+        'instruments': '',
+        'labels': [],
+        'extra_attributes': [],
+        'submitter': 'deep.chatterjee@ligo.org',
+        'offline': False
+    },
+    'alert_type': 'new',
+    'uid': ''
+}
 
 
-class T0212TTPResponse(object):
+class T0212HTTPResponse(object):
     def json(self):
         return resource_json(__name__, 'data/T0212_S0039_preferred.json')
 
 
-class SingleT0212TTPResponse(object):
+class SingleT0212HTTPResponse(object):
     def __init__(self, event):
         if event != 'T0212':
             raise ValueError("Called with incorrect preferred event")
@@ -41,12 +37,82 @@ class SingleT0212TTPResponse(object):
         response = resource_json(
             __name__, 'data/T0212_S0039_preferred.json')
         response['instruments'] = "H1"
+        # FIXME setting the chisq value for None for other detetors
+        # this is supposed to be temporary fix. To be removed when
+        # gstlal uploads correct 'instruments' field
+        response['extra_attributes']['SingleInspiral'] = [
+            {'chisq': 1 if instrument in ['H1'] else None}
+            for instrument in ['H1', 'L1', 'V1']]
         return response
 
 
-class G000012TTPResponse(object):
+class G000012HTTPResponse(object):
     def json(self):
         return resource_json(__name__, 'data/G000012_S0040_preferred.json')
+
+
+class G330308HTTPResponse(object):
+    def json(self):
+        return {
+            'graceid': 'G330308',
+            'gpstime': 1239917954.250977,
+            'pipeline': 'pycbc',
+            'group': 'CBC',
+            'offline': False,
+            'far': 1.48874654585461e-08,
+            'instruments': 'H1,L1',
+            'extra_attributes': {
+                'SingleInspiral': [
+                    {
+                        'chisq': 1.07,
+                        'snr': 7.95,
+                        'ifo': 'L1'
+                    },
+                    {
+                        'chisq': 0.54,
+                        'snr': 6.35,
+                        'ifo': 'H1'
+                    }
+                ],
+                'CoincInspiral': {
+                    'snr': 10.17
+                }
+            },
+            'search': 'AllSky',
+            'superevent': 'S190421ar'
+        }
+
+
+class G330298HTTPResponse(object):
+    def json(self):
+        return {
+            'graceid': 'G330298',
+            'gpstime': 1239917954.40918,
+            'pipeline': 'spiir',
+            'group': 'CBC',
+            'offline': False,
+            'far': 5.57979637960671e-06,
+            'instruments': 'H1,L1',
+            'extra_attributes': {
+                'SingleInspiral': [
+                    {
+                        'chisq': 0.61,
+                        'snr': 6.64,
+                        'ifo': 'L1'
+                    },
+                    {
+                        'chisq': 1.1,
+                        'snr': 8.14,
+                        'ifo': 'H1'
+                    }
+                ],
+                'CoincInspiral': {
+                    'snr': 10.51
+                }
+            },
+            'search': 'HighMass',
+            'superevent': 'S190421ar'
+        }
 
 
 @pytest.fixture(autouse=True)
@@ -58,7 +124,7 @@ def mock_db(monkeypatch):
         def createSuperevent(self, *args, **kwargs):    # noqa: N802
             pass
 
-        def superevents(self, **kwargs):
+        def superevents(self, *args, **kwargs):
             response = resource_json(__name__, 'data/superevents.json')
             return (s for s in response['superevents'])
 
@@ -70,27 +136,35 @@ def mock_db(monkeypatch):
 
         def event(self, gid):
             if gid == "T0212":
-                return T0212TTPResponse()
+                return T0212HTTPResponse()
             elif gid == "G000012":
-                return G000012TTPResponse()
+                return G000012HTTPResponse()
+            elif gid == "G330308":
+                return G330308HTTPResponse()
+            elif gid == "G330298":
+                return G330298HTTPResponse()
             else:
-                raise ValueError("Called with incorrect preferred event")
+                raise ValueError("Called with incorrect preferred event %s"
+                                 % (gid))
+
     monkeypatch.setattr('gwcelery.tasks.gracedb.client', FakeDb())
     yield
 
 
 def test_update_preferred_event(mock_db):
-    def mock_response():
-        return dict(graceid="T1234",
-                    instruments="I1,J1,K1,L1,M1",
-                    group="CBC",
-                    superevent="some_superevent",
-                    far=1e-30,
-                    snr=30.0)
+    payload = dict(graceid="T1234",
+                   instruments="I1,J1,K1,L1,M1",
+                   group="CBC",
+                   pipeline="gstlal",
+                   offline=False,
+                   superevent="some_superevent",
+                   far=1e-30,
+                   extra_attributes=dict(CoincInspiral=dict(snr=30.0)))
     with patch.object(gracedb.client, 'updateSuperevent') as p:
         superevents._update_superevent('S0039',
                                        'T0212',
-                                       mock_response(),
+                                       payload,
+                                       None,
                                        None,
                                        None)
         p.assert_called_with('S0039', preferred_event='T1234',
@@ -160,6 +234,24 @@ def test_upload_same_event():
         p2.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    'group,pipeline,offline,far,instruments,expected_result',
+    [['CBC', 'gstlal', False, 1.e-10, 'H1', False],
+     ['CBC', 'gstlal', False, 1.e-6, 'H1,L1', False],
+     ['Burst', 'cwb', False, 1e-15, 'H1,L1', True],
+     ['Burst', 'cwb', True, 1e-30, 'H1,L1,V1', False]])
+def test_should_publish(group, pipeline, offline, far, instruments,
+                        expected_result):
+    event = dict(graceid='G123456',
+                 group=group,
+                 pipeline=pipeline,
+                 far=far,
+                 offline=offline,
+                 instruments=instruments)
+    result = superevents.should_publish(event)
+    assert result == expected_result
+
+
 def test_parse_trigger_raising():
     garbage_payload = dict(some_value=999, something_else=99)
     with pytest.raises(KeyError):
@@ -178,6 +270,7 @@ def test_parse_trigger_cbc_1(mock_db):
                            'gpstime': 1163905224.4332082,
                            'group': 'CBC',
                            'pipeline': 'gstlal',
+                           'offline': False,
                            'far': 3e-09,
                            'instruments': 'H1,L1',
                            'extra_attributes': {
@@ -200,6 +293,7 @@ def test_parse_trigger_cbc_2(mock_db):
                            'gpstime': 1163905224.4332082,
                            'group': 'CBC',
                            'pipeline': 'gstlal',
+                           'offline': False,
                            'far': 3e-31,
                            'instruments': 'H1,L1',
                            'extra_attributes': {
@@ -207,13 +301,14 @@ def test_parse_trigger_cbc_2(mock_db):
                    alert_type='new',
                    uid='G000003')
     # addEventToSuperevent should be called
-    # preferred event should be updated
+    # preferred event should be updated, t_0 should change
     with patch.object(gracedb.client, 'addEventToSuperevent') as p1, \
             patch.object(gracedb.client, 'updateSuperevent') as p2:
         superevents.handle(payload)
         p1.assert_called_once()
         p2.assert_called_once_with('S0039', preferred_event='G000003',
-                                   t_0=None, t_start=None, t_end=None)
+                                   t_0=1163905224.4332082, t_start=None,
+                                   t_end=None)
 
 
 def test_parse_trigger_cbc_3(mock_db):
@@ -224,6 +319,7 @@ def test_parse_trigger_cbc_3(mock_db):
                            'gpstime': 1286741861.52678,
                            'group': 'CBC',
                            'pipeline': 'gstlal',
+                           'offline': False,
                            'far': 3e-31,
                            'instruments': 'H1,L1,V1',
                            'extra_attributes': {
@@ -244,6 +340,7 @@ def test_parse_trigger_cbc_4(mock_db):
                            'gpstime': 1286741861.52678,
                            'group': 'CBC',
                            'pipeline': 'gstlal',
+                           'offline': False,
                            'far': 5.5e-02,
                            'instruments': 'H1,L1,V1',
                            'extra_attributes': {
@@ -269,6 +366,7 @@ def test_parse_trigger_burst_1(mock_db):
                            'gpstime': 1163905214.4,
                            'group': 'Burst',
                            'pipeline': 'cwb',
+                           'offline': False,
                            'far': 3.02e-09,
                            'instruments': 'H1,L1',
                            'extra_attributes': {
@@ -301,6 +399,7 @@ def test_parse_trigger_burst_2(mock_db):
                            'gpstime': 1163905239.5,
                            'group': 'Burst',
                            'pipeline': 'oLIB',
+                           'offline': False,
                            'far': 3.02e-16,
                            'instruments': 'H1,L1',
                            'extra_attributes': {
@@ -329,6 +428,7 @@ def test_parse_trigger_burst_3(mock_db):
                            'gpstime': 1163905249.5,
                            'group': 'Burst',
                            'pipeline': 'oLIB',
+                           'offline': False,
                            'far': 3.02e-16,
                            'instruments': 'H1,L1',
                            'extra_attributes': {
@@ -358,6 +458,7 @@ def test_parse_trigger_burst_4(mock_db):
                            'gpstime': 1128658942.9878,
                            'group': 'Burst',
                            'pipeline': 'CWB',
+                           'offline': False,
                            'far': 1.23e-09,
                            'instruments': 'H1,L1',
                            'extra_attributes': {
@@ -381,6 +482,7 @@ def test_single_ifo_1(mock_db):
                            'gpstime': 1163905224.4332,
                            'group': 'CBC',
                            'pipeline': 'gstlal',
+                           'offline': False,
                            'far': 3.02e-09,
                            'instruments': 'H1',
                            'extra_attributes': {
@@ -409,6 +511,7 @@ def test_single_ifo_2(mock_db):
                            'gpstime': 1163905224.4332,
                            'group': 'CBC',
                            'pipeline': 'gstlal',
+                           'offline': False,
                            'far': 3.02e-31,
                            'instruments': 'H1',
                            'extra_attributes': {
@@ -436,6 +539,7 @@ def test_single_ifo_3(mock_db):
                            'gpstime': 1163905214.44,
                            'group': 'CBC',
                            'pipeline': 'gstlal',
+                           'offline': False,
                            'far': 3.02e-09,
                            'instruments': 'H1,L1',
                            'extra_attributes': {
@@ -443,7 +547,7 @@ def test_single_ifo_3(mock_db):
                                    'snr': 10.0}}},
                    alert_type='new',
                    uid='G000011')
-    setattr(gracedb.client, 'event', SingleT0212TTPResponse)
+    setattr(gracedb.client, 'event', SingleT0212HTTPResponse)
     # addEventToSuperevent should be called
     # preferred event should be updated
     with patch.object(gracedb.client, 'addEventToSuperevent') as p1, \
@@ -452,7 +556,7 @@ def test_single_ifo_3(mock_db):
         p1.assert_called_once()
         p2.assert_called_once_with(
             'S0039', preferred_event='G000011',
-            t_0=None,
+            t_0=1163905214.44,
             t_end=pytest.approx(1163905239.44, abs=1e-3),
             t_start=pytest.approx(1163905213.44, abs=1e-3))
 
@@ -467,6 +571,7 @@ def test_single_ifo_4(mock_db):
                            'gpstime': 1078515565.0,
                            'group': 'CBC',
                            'pipeline': 'gstlal',
+                           'offline': False,
                            'far': 3.02e-31,
                            'instruments': 'H1',
                            'extra_attributes': {
@@ -476,6 +581,33 @@ def test_single_ifo_4(mock_db):
                    uid='G000013')
     # addEventToSuperevent should be called
     # preferred event should not be updated
+    with patch.object(gracedb.client, 'addEventToSuperevent') as p1, \
+            patch.object(gracedb.client, 'updateSuperevent') as p2:
+        superevents.handle(payload)
+        p1.assert_called_once()
+        p2.assert_not_called()
+
+
+def test_S190421ar_spiir_scenario(mock_db):    # noqa: N802
+    """Test to ensure that a low FAR event with accidental high
+    SNR is not promoted to the preferred event status. For example, here,
+    the new event G330298 has SNR 10.51, higher than the preferred event
+    G330308 which has SNR 10.17. But the preferred event is not changed on
+    the basis of low FAR.
+    """
+    payload = dict(lvalert_content,
+                   object={'graceid': 'G330298',
+                           'gpstime': 1239917954.40918,
+                           'far': 5.57979637960671e-06,
+                           'group': 'CBC',
+                           'instruments': 'H1,L1',
+                           'pipeline': 'spiir',
+                           'offline': False,
+                           'extra_attributes': {
+                               'CoincInspiral': {
+                                   'snr': 10.5107507705688}}},
+                   alert_type='new',
+                   uid='G330298')
     with patch.object(gracedb.client, 'addEventToSuperevent') as p1, \
             patch.object(gracedb.client, 'updateSuperevent') as p2:
         superevents.handle(payload)

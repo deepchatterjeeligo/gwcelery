@@ -1,5 +1,6 @@
 from lxml import etree
 from urllib.parse import urlparse
+from celery.utils.log import get_logger
 
 from celery import chain
 
@@ -10,6 +11,8 @@ from . import gracedb
 from . import ligo_fermi_skymaps
 from . import lvalert
 from . import raven
+
+log = get_logger(__name__)
 
 
 @gcn.handler(gcn.NoticeType.SNEWS,
@@ -31,7 +34,7 @@ def handle_snews_gcn(payload):
     events = gracedb.get_events(query=query)
 
     if events:
-        assert len(events) == 1, 'Found more than one matching GraceDb entry'
+        assert len(events) == 1, 'Found more than one matching GraceDB entry'
         event, = events
         graceid = event['graceid']
         gracedb.replace_event(graceid, payload)
@@ -71,17 +74,21 @@ def handle_grb_gcn(payload):
     stream_path = u.path
 
     #  Get TrigID
-    trig_id = root.find("./What/Param[@name='TrigID']").attrib['value']
+    try:
+        trig_id = root.find("./What/Param[@name='TrigID']").attrib['value']
+    except AttributeError:
+        trig_id = root.find("./What/Param[@name='Trans_Num']").attrib['value']
 
     stream_obsv_dict = {'/SWIFT': 'Swift',
-                        '/Fermi': 'Fermi'}
+                        '/Fermi': 'Fermi',
+                        '/UntargetedSubGRB': 'Fermi'}
     event_observatory = stream_obsv_dict[stream_path]
     query = 'group: External pipeline: {} grbevent.trigger_id = "{}"'.format(
         event_observatory, trig_id)
     events = gracedb.get_events(query=query)
 
     if events:
-        assert len(events) == 1, 'Found more than one matching GraceDb entry'
+        assert len(events) == 1, 'Found more than one matching GraceDB entry'
         event, = events
         graceid = event['graceid']
         gracedb.replace_event(graceid, payload)
@@ -99,9 +106,7 @@ def handle_grb_gcn(payload):
 
 @lvalert.handler('superevent',
                  'mdc_superevent',
-                 'test_superevent',
                  'external_fermi',
-                 'external_fermi_grb',
                  'external_grb',
                  'external_swift',
                  shared=False)
@@ -121,32 +126,30 @@ def handle_grb_lvalert(alert):
     * The ``EM_COINC`` label triggers the creation of a combined GW-GRB sky map
       using :meth:`gwcelery.tasks.ligo_fermi_skymaps.create_combined_skymap`.
     """
-    # Determine GraceDb ID
+    # Determine GraceDB ID
     graceid = alert['uid']
 
     if alert['alert_type'] == 'new' and \
             alert['object'].get('group', '') == 'External':
-        raven.coincidence_search(graceid, alert['object'], group='CBC').delay()
+        raven.coincidence_search(graceid, alert['object'], group='CBC')
         raven.coincidence_search(graceid, alert['object'],
-                                 group='Burst').delay()
+                                 group='Burst')
     elif graceid.startswith('S'):
         preferred_event_id = gracedb.get_superevent(graceid)['preferred_event']
         group = gracedb.get_event(preferred_event_id)['group']
         if alert['alert_type'] == 'new':
             raven.coincidence_search(graceid, alert['object'],
                                      group=group,
-                                     pipelines=['Fermi', 'Swift']).delay()
+                                     pipelines=['Fermi', 'Swift'])
         elif alert['alert_type'] == 'label_added':
             if alert['data']['name'] == 'EM_COINC':
                 ligo_fermi_skymaps.create_combined_skymap(graceid).delay()
-                raven.calculate_coincidence_far(graceid, group).delay()
                 raven.calculate_spacetime_coincidence_far(graceid,
                                                           group).delay()
 
 
 @lvalert.handler('superevent',
                  'mdc_superevent',
-                 'test_superevent',
                  'external_snews',
                  'external_snews_supernova',
                  shared=False)
@@ -164,7 +167,7 @@ def handle_snews_lvalert(alert):
     * Any new event triggers a coincidence search with
       :meth:`gwcelery.tasks.raven.coincidence_search`.
     """
-    # Determine GraceDb ID
+    # Determine GraceDB ID
     graceid = alert['uid']
 
     if alert['object'].get('group', '') == 'Test':
@@ -172,13 +175,13 @@ def handle_snews_lvalert(alert):
     elif alert['alert_type'] == 'new' and \
             alert['object'].get('group', '') == 'External':
         raven.coincidence_search(graceid, alert['object'],
-                                 group='Burst', pipelines=['SNEWS']).delay()
+                                 group='Burst', pipelines=['SNEWS'])
     elif graceid.startswith('S'):
         preferred_event_id = gracedb.get_superevent(graceid)['preferred_event']
         group = gracedb.get_event(preferred_event_id)['group']
         if alert['alert_type'] == 'new' and group == 'Burst':
             raven.coincidence_search(graceid, alert['object'],
-                                     group=group, pipelines=['SNEWS']).delay()
+                                     group=group, pipelines=['SNEWS'])
 
 
 @lvalert.handler('superevent',
@@ -198,7 +201,7 @@ def handle_emcoinc_lvalert(alert):
     * Any EM_COINC label application triggers
       :meth:`gwcelery.tasks.circulars.create_emcoinc_circular`.
     """
-    # Determine GraceDb ID
+    # Determine GraceDB ID
     graceid = alert['uid']
     if alert['alert_type'] == 'label_added':
         if alert['data']['name'] == 'EM_COINC':
