@@ -321,7 +321,7 @@ def job_error_notification(request, exc, traceback, superevent_id, rundir):
 
 @app.task(ignore_result=True, shared=False)
 def _upload_url(rundir, pe_results_path, graceid):
-    """Generate the summary pages using PESummary."""
+    """Upload url of a page containing all of the plots."""
     path_to_posplots, = _find_paths_from_name(pe_results_path, 'home.html')
 
     baseurl = urllib.parse.urljoin(
