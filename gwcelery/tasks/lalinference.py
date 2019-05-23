@@ -320,7 +320,7 @@ def job_error_notification(request, exc, traceback, superevent_id, rundir):
 
 
 @app.task(ignore_result=True, shared=False)
-def _generate_and_upload_url(rundir, pe_results_path, graceid):
+def _upload_url(rundir, pe_results_path, graceid):
     """Generate the summary pages using PESummary."""
     path_to_posplots, = _find_paths_from_name(pe_results_path, 'home.html')
 
@@ -471,8 +471,6 @@ def start_pe(ini_contents, preferred_event_id, superevent_id):
         condor.submit.s().on_error(
             job_error_notification.s(superevent_id, rundir)
         )
-        |
-        _generate_and_upload_url.si(rundir, pe_results_path, superevent_id)
         |
         dag_finished(rundir, preferred_event_id, superevent_id)
     ).delay()
