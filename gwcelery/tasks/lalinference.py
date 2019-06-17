@@ -409,11 +409,11 @@ def dag_finished(rundir, preferred_event_id, superevent_id):
         group(
             _upload_skymap(pe_results_path, superevent_id),
             _upload_result(
-                pe_results_path, 'extrinsic.png', superevent_id,
+                pe_results_path, 'Online_extrinsic.png', superevent_id,
                 'Corner plot for extrinsic parameters', 'pe'
             ),
             _upload_result(
-                pe_results_path, 'sourceFrame.png', superevent_id,
+                pe_results_path, 'Online_source_frame.png', superevent_id,
                 'Corner plot for source frame parameters', 'pe'
             )
         ) | gracedb.create_label.si('PE_READY', superevent_id) | \
