@@ -1,7 +1,64 @@
 Changelog
 =========
 
-0.6.1 (unreleased)
+0.7.0 (unreleased)
+------------------
+
+-   Trigger a preliminary alert for a superevent upon the first time that the
+    preferred event is set to an event that meets the public alert criterion.
+
+    This fixes a longstanding issue that has prevented automated preliminary
+    alerts from being sent so far. The preferred event *at the instant that the
+    timeout ended* did not meet the public alert criterion, but a preferred
+    event that was selected some tens of seconds later did.
+
+-   Decrease preliminary alert timeout to one minute.
+
+0.6.3 (2019-06-14)
+------------------
+
+-   Work around a Celery canvas bug that prevented LALInference postprocessing
+    from completing.
+
+-   Fix a copy-paste error that caused ``DQV`` and ``INJ`` labels to be ignored
+    when determining whether to send a preliminary alert.
+
+-   Move RAVEN time coincidence windows to the application configuration.
+
+-   Document the acceptence tests checklist in the instructions for preparing a
+    release.
+
+-   Update ligo-raven to version 1.14.
+
+0.6.2 (2019-06-07)
+------------------
+
+-   Add a dependency on dnspython to silence the following warning message from
+    SleekXMPP::
+
+        DNS: dnspython not found. Can not use SRV lookup.
+
+-   Pin some recently updated dependencies of Celery that caused unit test
+    failures: amqp <= 2.4.2, kombu <= 4.5.0, vine <= 1.3.0.
+
+-   Prevent subthreshold GRBs with low reliability from being processed as
+    external events. 
+
+-   Add a task in orchestrator.py to generate FITS files and sky map images
+    automatically whenever an HDF5 posterior samples file is uploaded.
+
+-   Remove special-case handling of single-instrument events. Now, the
+    eligibility of an event for a public alert is determined only on the basis
+    of its false alarm rate.
+
+-   Run parameter estimation on nodes dedicted to online-PE.
+
+-   Emcoinc circular is triggered when RAVEN uploads a coincident FAR.
+
+-   Pin scipy since scipy>=1.3.0 removes an interpolation function which
+    lalinference postprocessing requires.
+
+0.6.1 (2019-05-24)
 ------------------
 
 -   Work around a bug in the Sentry Python SDK that caused excessive reporting
@@ -11,16 +68,25 @@ Changelog
     ..  _`getsentry/sentry-python#370`: https://github.com/getsentry/sentry-python/issues/370
 
 -   Change the name of BAYESTAR localization files to
-    ``bayestar.multiorder.fits`` to distinguish from them from the
-    flat-resolution HEALPix files, which are still named ``bayestar.fits.gz``.
+    ``bayestar.multiorder.fits`` to distinguish them from flat-resolution
+    HEALPix files, which are still named ``bayestar.fits.gz``.
 
 -   Reimplement LVAlert listener as a Celery bootstep to avoid needing to track
     a singleton task using a Redis lock, because Redis locks do not play nicely
     with Redis persistence. The ``--lvalert`` command line option must now be
     passed in order to enable the LVAlert listener.
 
+-   Turn on Redis database persistence so that Celery task state is preserved
+    across restarts.
+
 -   Add ``expose_to_public`` setting to disable exposing GraceDB events to the
     public in all environments except for production.
+
+-   Update to the latest version of GWPy and un-pin Matplotlib because GWPy
+    now supports Matplotlib 3.1.
+
+-   Pin LALSuite to version 6.54 because LALInference in LALSuite 6.55 is not
+    compatible with Python 3.
 
 0.6.0 (2019-05-20)
 ------------------

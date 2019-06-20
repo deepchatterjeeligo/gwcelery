@@ -1,3 +1,9 @@
+include:
+  - project: emfollow/gitlab-ci-templates
+    file: lint.yml
+  - project: emfollow/gitlab-ci-templates
+    file: sccb.yml
+
 variables:
   # Allow Celery to run as root, because everything runs as root under Docker.
   C_FORCE_ROOT: 'true'
@@ -92,12 +98,45 @@ test/python3.7:
 lint:
   image: $CI_REGISTRY_IMAGE/dependencies/python3.6:$CI_COMMIT_REF_NAME
   stage: test
-  script:
+  before_script:
     - tar --strip-components 1 -xf *.tar.*
-    - pip install flake8 'pep8-naming!=0.8.0'
-    - flake8 --show-source .
   dependencies:
     - sdist
+
+associate commits in Sentry:
+  stage: test
+  dependencies:
+    - sdist
+  variables:
+    GIT_STRATEGY: fetch
+  only:
+    - master@emfollow/gwcelery
+    - tags@emfollow/gwcelery
+  image:
+    name: getsentry/sentry-cli
+    entrypoint: [""]
+  script:
+    # FIXME: Override git remote settings.
+    # Remove this once git.ligo.org has Sentry initegraton turned on.
+    - |
+      cat <<EOF > .git/config
+      [core]
+        repositoryformatversion = 0
+        filemode = true
+        bare = false
+        logallrefupdates = true
+        ignorecase = true
+        precomposeunicode = true
+      [remote "origin"]
+        url = https://github.com/lpsinger/gwcelery
+        fetch = +refs/heads/*:refs/remotes/origin/*
+      [branch "master"]
+        remote = origin
+        merge = refs/heads/master
+      EOF
+    - SENTRY_VERSION=$(echo *.tar.* | sed 's/\.tar\..*//')
+    - sentry-cli releases new ${SENTRY_VERSION}
+    - sentry-cli releases set-commits --auto ${SENTRY_VERSION}
 
 # Build docker container for application itself
 .docker: &docker
@@ -138,79 +177,8 @@ doc:
     - sdist
 
 # SCCB request
-open SCCB issue for release:
-  image: python
+sccb:
   stage: deploy
-  only:
-    - tags@emfollow/gwcelery
-  dependencies: []
-  variables:
-    GIT_STRATEGY: fetch
-    PROJECT: sccb/requests
-  script:
-    - VERSION="$(python setup.py --version)"
-    - >
-      LAST_VERSION="$(git tag -l |
-      python -c 'from pkg_resources import parse_version;
-      import sys;
-      current_version = parse_version(sys.argv[1]);
-      versions = [parse_version(line) for line in sys.stdin];
-      last_version = max(v for v in versions if v < current_version);
-      print(last_version)' "$VERSION")"
-    - MAJOR_MINOR_VERSION=$(echo "$VERSION" | cut -d . -f 1,2)
-    - LAST_MAJOR_MINOR_VERSION=$(echo "$LAST_VERSION" | cut -d . -f 1,2)
-    - TITLE="$CI_PROJECT_NAME-$VERSION"
-    - >
-      PROJECT_SLUG="$(
-      python -c 'import urllib.parse, sys;
-      print(urllib.parse.quote(sys.argv[1], safe=""))' "$PROJECT"
-      )"
-    - |
-      cat > description <<EOF
-      #### Details
-
-      - **Package name:** $CI_PROJECT_NAME
-      - **Version:** $VERSION
-      - **Source:** https://pypi.org/packages/source/${CI_PROJECT_NAME:0:1}/$CI_PROJECT_NAME/$CI_PROJECT_NAME-$VERSION.tar.gz
-
-      #### Description
-
-      See [change log]($CI_PROJECT_URL/blob/v${VERSION}/CHANGES.rst) and
-      [diff from last release](https://git.ligo.org/emfollow/gwcelery/compare/v${LAST_VERSION}...v${VERSION}).
-
-      #### Distributions
-
-      Not applicable: this project uses [continuous deployment](https://gwcelery.readthedocs.io/en/latest/deployment.html#continuous-deployment).
-
-      #### Request type
-
-      Please select all of the following that apply:
-
-      - [ ] this is a new package
-      - [$(if [ "$MAJOR_MINOR_VERSION" = "$LAST_MAJOR_MINOR_VERSION" ]; then echo 'X'; else echo ' '; fi)] this is a backwards-compatible update
-      - [$(if [ "$MAJOR_MINOR_VERSION" = "$LAST_MAJOR_MINOR_VERSION" ]; then echo ' '; else echo 'X'; fi)] this is a backwards-incompatible update [API/ABI changes]
-
-      #### SCCB Voting
-
-      <!-- DO NOT EDIT THIS SECTION -->
-
-      SCCB members will here indicate their vote to approve the above request:
-
-      - [ ] Brunett
-      - [ ] Carbognani
-      - [ ] Clark
-      - [ ] Macleod
-      - [ ] Mendell
-      - [ ] Mercer
-      - [ ] Rollins
-      EOF
-    - >
-      curl --silent --show-error --fail
-      --request POST --header "Private-Token: $GITLAB_ACCESS_TOKEN"
-      --data-urlencode "labels=Requested"
-      --data-urlencode "title=$TITLE"
-      --data-urlencode "description@description"
-      "$CI_API_V4_URL/projects/$PROJECT_SLUG/issues"
 
 # Publish coverage
 pages:
@@ -238,6 +206,50 @@ pypi:
     - bdist
   only:
     - tags@emfollow/gwcelery
+
+# Create a release in GitLab
+release:
+  stage: deploy
+  image: python
+  variables:
+    GIT_STRATEGY: fetch
+  script:
+    - PACKAGE_NAME="$(python setup.py --name)"
+    - PACKAGE_VERSION="$(python setup.py --version)"
+    - CHANGES_FILENAME="$(echo CHANGES.*)"
+    - |
+      tee json <<EOF
+      {
+        "name": "${PACKAGE_VERSION}",
+        "tag_name": "${CI_COMMIT_TAG}",
+        "description": "Version ${PACKAGE_VERSION}",
+        "assets": {
+          "links": [
+            {
+              "name": "PyPI",
+              "url": "https://pypi.org/project/${PACKAGE_NAME}/${PACKAGE_VERSION}/"
+            },
+            {
+              "name": "Change log",
+              "url": "${CI_PROJECT_URL}/blob/v${VERSION}/${CHANGES_FILENAME}"
+            },
+            {
+              "name": "Documentation",
+              "url": "https://${PACKAGE_NAME}.readthedocs.io/en/v${PACKAGE_VERSION}/"
+            }
+          ]
+        }
+      }
+      EOF
+    - |
+      if [ -n "$CI_COMMIT_TAG" ]
+      then
+        curl --silent --show-error --fail \
+        --request POST --header "Private-Token: $GITLAB_ACCESS_TOKEN" \
+        --header "Content-Type: application/json" \
+        --data "@json" \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases"
+      fi
 
 .deploy-common: &deploy-common
   stage: deploy

@@ -1,5 +1,7 @@
+import argparse
 import gzip
 import io
+import os
 from unittest.mock import patch
 
 from astropy.table import Table
@@ -99,3 +101,23 @@ def test_plot_volume(mock_plot_volume):
     mock_plot_volume.assert_called_once()
     cmdline, = mock_plot_volume.call_args[0]
     assert cmdline[-2].endswith('.png')
+
+
+def test_skymap_from_samples(toy_3d_fits_filecontents):
+
+    def mock_skymap_from_samples(args):
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--outdir', '-o', default='.')
+        parser.add_argument('--fitsoutname', default='skymap.fits')
+        parser.add_argument('samples')
+        args = parser.parse_args(args)
+        with open(os.path.join(args.outdir, args.fitsoutname), 'wb') as f:
+            f.write(toy_3d_fits_filecontents)
+
+    inbytes = pkg_resources.resource_string(__name__, 'data/samples.hdf5')
+
+    with patch('ligo.skymap.tool.ligo_skymap_from_samples.main',
+               mock_skymap_from_samples):
+        outbytes = skymaps.skymap_from_samples(inbytes)
+
+    assert skymaps.is_3d_fits_file(outbytes)

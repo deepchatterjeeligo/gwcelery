@@ -3,6 +3,7 @@ vetting and annotation workflow to produce preliminary, initial, and update
 alerts for gravitational-wave event candidates."""
 import json
 import re
+from socket import gaierror
 from urllib.error import URLError
 
 from celery import chain, group
@@ -23,6 +24,21 @@ from . import skymaps
 from . import superevents
 
 
+@lvalert.handler('cbc_gstlal',
+                 'cbc_spiir',
+                 'cbc_pycbc',
+                 'cbc_mbtaonline',
+                 'burst_olib',
+                 'burst_cwb',
+                 shared=False)
+def handle_selected_as_preferred(alert):
+    # FIXME DQV & INJ labels not incorporated into labeling ADVREQ,
+    # Remove after !495 is merged
+    if alert['alert_type'] == 'selected_as_preferred' \
+            and superevents.should_publish(alert['object']):
+        gracedb.create_label.delay('ADVREQ', alert['object']['superevent'])
+
+
 @lvalert.handler('superevent',
                  'mdc_superevent',
                  shared=False)
@@ -31,32 +47,14 @@ def handle_superevent(alert):
 
     After waiting for a time specified by the
     :obj:`~gwcelery.conf.orchestrator_timeout` configuration variable
-    for the choice of preferred event to settle down, this task peforms data
+    for the choice of preferred event to settle down, this task performs data
     quality checks with :meth:`gwcelery.tasks.detchar.check_vectors` and
     calls :meth:`~gwcelery.tasks.orchestrator.preliminary_alert` to send a
     preliminary GCN notice.
     """
-
     superevent_id = alert['uid']
-
+    # launch PE and detchar based on new type superevents
     if alert['alert_type'] == 'new':
-        start = alert['object']['t_start']
-        end = alert['object']['t_end']
-
-        (
-            _get_preferred_event.si(superevent_id).set(
-                countdown=app.conf['orchestrator_timeout']
-            )
-            |
-            gracedb.get_event.s()
-            |
-            detchar.check_vectors.s(superevent_id, start, end)
-            |
-            preliminary_alert.s(superevent_id)
-        ).apply_async()
-
-        # Wait for longer time before parameter estimation in case the
-        # preferred event is updated with high latency.
         (
             _get_preferred_event.si(superevent_id).set(
                 countdown=app.conf['pe_timeout']
@@ -70,6 +68,31 @@ def handle_superevent(alert):
             parameter_estimation.s(superevent_id)
         ).apply_async()
 
+    elif alert['alert_type'] == 'label_added':
+        label_name = alert['data']['name']
+        # launch preliminary alert on ADVREQ
+        if label_name == 'ADVREQ':
+            (
+                _get_preferred_event.si(superevent_id).set(
+                    countdown=app.conf['orchestrator_timeout']
+                )
+                |
+                gracedb.get_event.s()
+                |
+                detchar.check_vectors.s(
+                    superevent_id,
+                    alert['object']['t_start'],
+                    alert['object']['t_end']
+                )
+                |
+                preliminary_alert.s(superevent_id)
+            ).apply_async()
+        # launch initial/retraction alert on ADVOK/ADVNO
+        elif label_name == 'ADVOK':
+            initial_alert(superevent_id)
+        elif label_name == 'ADVNO':
+            retraction_alert(superevent_id)
+
     # check DQV label on superevent, run check_vectors if required
     elif alert['alert_type'] == 'event_added':
         new_event_id = alert['data']['preferred_event']
@@ -78,18 +101,12 @@ def handle_superevent(alert):
 
         if 'DQV' in gracedb.get_labels(superevent_id):
             (
-                detchar.check_vectors.s(new_event_id, superevent_id,
-                                        start, end)
+                gracedb.get_event.s(new_event_id)
+                |
+                detchar.check_vectors.s(superevent_id, start, end)
                 |
                 _update_if_dqok.si(superevent_id, new_event_id)
             ).apply_async()
-
-    elif alert['alert_type'] == 'label_added':
-        label_name = alert['data']['name']
-        if label_name == 'ADVOK':
-            initial_alert(superevent_id)
-        elif label_name == 'ADVNO':
-            retraction_alert(superevent_id)
 
 
 @lvalert.handler('cbc_gstlal',
@@ -202,7 +219,46 @@ def handle_cbc_event(alert):
         ).delay()
 
 
-@app.task(autoretry_for=(HTTPError, URLError, TimeoutError),
+@lvalert.handler('superevent',
+                 'mdc_superevent',
+                 shared=False)
+def handle_posterior_samples(alert):
+    """Generate multi-resolution and flat-resolution fits files and skymaps
+    from an uploaded HDF5 file containing posterior samples.
+    """
+    if alert['alert_type'] != 'log' or \
+            not alert['data']['filename'].endswith('.posterior_samples.hdf5'):
+        return
+    superevent_id = alert['uid']
+    filename = alert['data']['filename']
+    prefix, _ = filename.rsplit('.posterior_samples.')
+    # FIXME: It is assumed that posterior samples always come from
+    # lalinference. After bilby or rift is integrated, this has to be fixed.
+    (
+        gracedb.download.si(filename, superevent_id)
+        |
+        skymaps.skymap_from_samples.s()
+        |
+        group(
+            skymaps.annotate_fits('{}.multiorder.fits'.format(prefix),
+                                  superevent_id, ['pe', 'sky_loc']),
+            gracedb.upload.s(
+                '{}.multiorder.fits'.format(prefix), superevent_id,
+                'Multiresolution fits file generated from {}'.format(filename),
+                ['pe', 'sky_loc']
+            ),
+            skymaps.flatten.s('{}.fits.gz'.format(prefix))
+            |
+            gracedb.upload.s(
+                '{}.fits.gz'.format(prefix), superevent_id,
+                'Flat-resolution fits file created from {}'.format(filename),
+                ['pe', 'sky_loc']
+            )
+        )
+    ).delay()
+
+
+@app.task(autoretry_for=(gaierror, HTTPError, URLError, TimeoutError),
           default_retry_delay=20.0, retry_backoff=True,
           retry_kwargs=dict(max_retries=500), shared=False)
 def _download(*args, **kwargs):
@@ -325,16 +381,13 @@ def preliminary_alert(event, superevent_id):
         skymap_filename += '.gz'
 
     # Determine if the event should be made public.
-    is_publishable = superevents.should_publish(event)
+    is_publishable = (superevents.should_publish(event)
+                      and {'DQV', 'INJ'}.isdisjoint(event['labels']))
 
     canvas = chain()
 
     if is_publishable:
-        canvas |= (
-            gracedb.create_label.si('ADVREQ', superevent_id)
-            |
-            gracedb.expose.si(superevent_id)
-        )
+        canvas |= gracedb.expose.si(superevent_id)
 
     # If there is a sky map, then copy it to the superevent and create plots.
     if skymap_filename is not None:
@@ -454,7 +507,7 @@ def parameter_estimation(far_event, superevent_id):
 
     This consists of the following steps:
 
-    1.   Upload an ini file which is suitable for the target event.
+    1.   Prepare and upload an ini file which is suitable for the target event.
     2.   Start Parameter Estimation if FAR is smaller than the PE threshold.
     """
     far, event = far_event
@@ -463,29 +516,18 @@ def parameter_estimation(far_event, superevent_id):
     # events.
     if event['group'] == 'CBC' and event['search'] != 'MDC':
         canvas = lalinference.pre_pe_tasks(event, superevent_id)
-        next_task = gracedb.upload.s(
-                        filename=lalinference.ini_name,
-                        graceid=superevent_id,
-                        message='Automatically generated LALInference ' +
-                                'configuration file for this event.',
-                        tags='pe'
-                    )
         if far <= app.conf['pe_threshold']:
-            next_task = group(
-                next_task,
-
-                lalinference.start_pe.s(preferred_event_id, superevent_id)
-            )
+            canvas |= lalinference.start_pe.s(preferred_event_id,
+                                              superevent_id)
         else:
-            next_task |= gracedb.upload.si(
-                             filecontents=None, filename=None,
-                             graceid=superevent_id,
-                             message='FAR is larger than the PE threshold, '
-                                     '{}  Hz. Parameter Estimation will not '
-                                     'start.'.format(app.conf['pe_threshold']),
-                             tags='pe'
-                         )
-        canvas |= next_task
+            canvas |= gracedb.upload.si(
+                          filecontents=None, filename=None,
+                          graceid=superevent_id,
+                          message='FAR is larger than the PE threshold, '
+                                  '{}  Hz. Parameter Estimation will not '
+                                  'start.'.format(app.conf['pe_threshold']),
+                          tags='pe'
+                      )
 
         canvas.apply_async()
 

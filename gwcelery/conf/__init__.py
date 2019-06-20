@@ -93,7 +93,7 @@ factor is the number of pipelines. CBC pipelines are gstlal, pycbc, mbtaonline,
 spiir-highmass, spiir-lowmass. Burst searches are cwb.allsky, cwb.bbh, cwb.imbh
 and olib.allsky."""
 
-orchestrator_timeout = 300.0
+orchestrator_timeout = 60.0
 """The orchestrator will wait this many seconds from the time of the
 creation of a new superevent to the time that annotations begin, in order
 to let the superevent manager's decision on the preferred event
@@ -145,9 +145,9 @@ llhoft_channels = {
 """Low-latency h(t) state vector configuration. This is a dictionary consisting
 of a channel and its bitmask, as defined in :mod:`gwcelery.tasks.detchar`."""
 
-idq_channels = ['H1:IDQ-PGLITCH_OVL_16_4096',
-                'L1:IDQ-PGLITCH_OVL_16_4096']
-"""Low-latency iDQ p(glitch) channel names"""
+idq_channels = ['H1:IDQ-PGLITCH_OVL_32_2048',
+                'L1:IDQ-PGLITCH_OVL_32_2048']
+"""Low-latency iDQ p(glitch) channel names from O2 replay."""
 
 idq_pglitch_thresh = 0.95
 """If P(Glitch) is above this threshold, and
@@ -240,3 +240,10 @@ pe_results_url = ('https://ldas-jobs.ligo.caltech.edu/~{}/'
                   'online_pe/').format(getpass.getuser())
 """URL of page where all the results of Parameter Estimation are outputted
 (see :mod:`gwcelery.tasks.lalinference`)"""
+
+raven_coincidence_windows = {'GRB_CBC': [-5, 1],
+                             'GRB_Burst': [-600, 60],
+                             'SNEWS': [-10, 10]}
+"""Time coincidence windows passed to ligo-raven. External events and
+superevents of the appropriate type are considered to be coincident if
+within time window of each other."""

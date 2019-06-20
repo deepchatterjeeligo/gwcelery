@@ -20,7 +20,6 @@ from ..jinja import env
 from .core import ordered_group
 from . import condor
 from . import gracedb
-from . import skymaps
 
 
 ini_name = 'online_pe.ini'
@@ -174,7 +173,18 @@ def prepare_ini(frametype_dict, event, superevent_id=None):
         'q': min([sngl['mass2'] / sngl['mass1']
                   for sngl in singleinspiraltable]),
     }
-    return ini_template.render(ini_settings)
+    ini_rota = ini_template.render(ini_settings)
+    ini_settings.update({'use_of_ini': 'online'})
+    ini_online = ini_template.render(ini_settings)
+    # upload ini file to GraceDB
+    if superevent_id is not None:
+        gracedb.upload.delay(
+            ini_rota, filename=ini_name, graceid=superevent_id,
+            message='Automatically generated LALInference configuration file'
+                    ' for this event.',
+            tags='pe')
+
+    return ini_online
 
 
 def pre_pe_tasks(event, superevent_id):
@@ -222,7 +232,7 @@ def dag_prepare(
     else:
         psd_arg = []
 
-    # write down .ini file in the run directory
+    # write down .ini file in the run directory.
     path_to_ini = rundir + '/' + ini_name
     with open(path_to_ini, 'w') as f:
         f.write(ini_contents)
@@ -247,6 +257,10 @@ def dag_prepare(
         )
         shutil.rmtree(rundir)
         raise
+    finally:
+        # Remove the ini file so that people do not accidentally use this ini
+        # file and hence online-PE-only nodes.
+        os.remove(path_to_ini)
 
     return rundir + '/multidag.dag.condor.sub'
 
@@ -351,22 +365,15 @@ def _get_result_contents(pe_results_path, filename):
     return contents
 
 
-def _upload_result(pe_results_path, filename, graceid, message, tag):
+def _upload_result(pe_results_path, filename, graceid, message, tag,
+                   uploaded_filename=None):
     """Return a canvas to get the contents of a PE result file and upload it to
     GraceDB.
     """
+    if uploaded_filename is None:
+        uploaded_filename = filename
     return _get_result_contents.si(pe_results_path, filename) | \
-        gracedb.upload.s(filename, graceid, message, tag)
-
-
-def _upload_skymap(pe_results_path, graceid):
-    return _get_result_contents.si(pe_results_path, 'LALInference.fits') | \
-        group(
-            skymaps.annotate_fits('LALInference.fits',
-                                  graceid, ['pe', 'sky_loc']),
-            gracedb.upload.s('LALInference.fits', graceid,
-                             'LALInference FITS sky map', ['pe', 'sky_loc'])
-        )
+        gracedb.upload.s(uploaded_filename, graceid, message, tag)
 
 
 @app.task(ignore_result=True, shared=False)
@@ -381,6 +388,7 @@ def clean_up(rundir):
     shutil.rmtree(rundir)
 
 
+@app.task(ignore_result=True, shared=False)
 def dag_finished(rundir, preferred_event_id, superevent_id):
     """Upload PE results and clean up run directory
 
@@ -404,10 +412,14 @@ def dag_finished(rundir, preferred_event_id, superevent_id):
 
     # FIXME: _upload_url.si has to be out of group for gracedb.create_label.si
     # to run
-    return \
-        _upload_url.si(pe_results_path, superevent_id) | \
+    (
+        _upload_url.si(pe_results_path, superevent_id) |
         group(
-            _upload_skymap(pe_results_path, superevent_id),
+            _upload_result(
+                rundir, 'posterior*.hdf5', superevent_id,
+                'LALInference posterior samples', 'pe',
+                'LALInference.posterior_samples.hdf5'
+            ),
             _upload_result(
                 pe_results_path, 'Online_extrinsic.png', superevent_id,
                 'Corner plot for extrinsic parameters', 'pe'
@@ -416,8 +428,9 @@ def dag_finished(rundir, preferred_event_id, superevent_id):
                 pe_results_path, 'Online_source_frame.png', superevent_id,
                 'Corner plot for source frame parameters', 'pe'
             )
-        ) | gracedb.create_label.si('PE_READY', superevent_id) | \
+        ) | gracedb.create_label.si('PE_READY', superevent_id) |
         clean_up.si(rundir)
+    ).delay()
 
 
 @gracedb.task(shared=False)
@@ -472,5 +485,5 @@ def start_pe(ini_contents, preferred_event_id, superevent_id):
             job_error_notification.s(superevent_id, rundir)
         )
         |
-        dag_finished(rundir, preferred_event_id, superevent_id)
+        dag_finished.si(rundir, preferred_event_id, superevent_id)
     ).delay()

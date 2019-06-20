@@ -1,29 +1,35 @@
+# FIXME: updates of these packages started breaking unit tests on 2019-05-30
+amqp <= 2.4.2
+kombu <= 4.5.0
+vine <= 1.3.0
+
 astropy
-celery[redis] >= 4.3.0
+celery[redis] == 4.3.0
 comet
 corner
+dnspython  # silence "DNS: dnspython not found. Can not use SRV lookup." warning from SleekXMPP
 flask
 flask-caching
 flower
 gwdatafind
-gwpy <= 0.14.0  # https://git.ligo.org/emfollow/gwcelery/issues/95
+gwpy
 healpy
 jinja2
-lalsuite >= 6.54
+lalsuite == 6.54
 ligo-followup-advocate >= 0.0.28
 ligo-gracedb >= 2.2.0
-ligo-raven >= 1.11
+ligo-raven >= 1.14
 ligo-segments
 ligo.skymap >= 0.1.1
 lscsoft-glue
 lxml
-matplotlib < 3.1  # matplotlib 3.1 breaks gwpy
 numpy
 p_astro==0.7
 pygcn >= 0.1.19
 pytest >= 3.0
 python-ligo-lw
 safe-netrc
+scipy <= 1.2.2  # This is because lalinference postprocess is not compatible with scipy >= 1.3.0. See https://git.ligo.org/lscsoft/lalsuite/issues/170.
 sentry-sdk[flask]
 service_identity  # We don't actually use this package, but it silences some annoying warnings from twistd.
 sleek-lvalert >= 0.0.4
