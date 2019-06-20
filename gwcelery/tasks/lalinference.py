@@ -416,9 +416,9 @@ def dag_finished(rundir, preferred_event_id, superevent_id):
         _upload_url.si(pe_results_path, superevent_id) |
         group(
             _upload_result(
-                rundir, 'posterior*.hdf5', superevent_id,
+                rundir, 'posterior_samples.json', superevent_id,
                 'LALInference posterior samples', 'pe',
-                'LALInference.posterior_samples.hdf5'
+                'LALInference.posterior_samples.json'
             ),
             _upload_result(
                 pe_results_path, 'Online_extrinsic.png', superevent_id,
