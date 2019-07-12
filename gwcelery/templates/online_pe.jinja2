@@ -1,27 +1,34 @@
 {# Template of ini file for Parameter Estimation. This is a jinja template. The
 explanation on jinja is here http://jinja.pocoo.org . #}
 
-{% set engine = 'lalinferencenest' %}
-{% set nparallel = '4' %}
-{% set roq = 'True' %}
-{% set roqdir = '/home/cbc/ROQ_data/IMRPhenomPv2/' %}
-{% set approx = 'IMRPhenomPv2pseudoFourPN' %}
-{% set neff = '1000' %}
-
-{# IMRPhenomPv2_ROQ can not be applied for large massratio #}
-{% if q <= 0.143 %}
-    {% set approx = 'SEOBNRv4_ROM' %}
-    {% set roqdir = '/home/cbc/ROQ_data/SEOBNRv4ROQ/' %}
-{% endif %}
-
-{# SEOBNRv4 for large massratio is not ROQed. #}
-{# Change to non-ROQ run but use mcmc with 10 chains to make the run fast #}
-{% if q <= 0.0588 %}
+{% if conf=='default' %}
+    {% set engine = 'lalinferencenest' %}
+    {% set nparallel = '4' %}
+    {% set roq = 'True' %}
+    {% set roqdir = '/home/cbc/ROQ_data/IMRPhenomPv2/' %}
+    {% set approx = 'IMRPhenomPv2pseudoFourPN' %}
+    {% set neff = '1000' %}
+    {# IMRPhenomPv2_ROQ can not be applied for large massratio #}
+    {% if q <= 0.143 %}
+        {% set approx = 'SEOBNRv4_ROM' %}
+        {% set roqdir = '/home/cbc/ROQ_data/SEOBNRv4ROQ/' %}
+    {% endif %}
+    {# SEOBNRv4 for large massratio is not ROQed. #}
+    {# Change to non-ROQ run but use mcmc with 10 chains to make the run fast #}
+    {% if q <= 0.0588 %}
+        {% set engine = 'lalinferencemcmc' %}
+        {% set nparallel = '10' %}
+        {% set roq = 'False' %}
+        {% set neff = '300' %}
+        {% set margphi = 'margphi=' %}
+    {% endif %}
+{% elif conf=='quick_bns' %}
     {% set engine = 'lalinferencemcmc' %}
-    {% set nparallel = '10' %}
-    {% set roq = 'False' %}
-    {% set neff = '300' %}
-    {% set margphi = 'margphi=' %}
+    {% set nparallel = '3' %}
+    {% set roq = 'True' %}
+    {% set roqdir = '/home/cbc/ROQ_data/IMRPhenomD_QuickBNS/' %}
+    {% set approx = 'IMRPhenomDpseudoFourPN' %}
+    {% set neff = '1000' %}
 {% endif %}
 
 {% if 'playground' in service_url %}

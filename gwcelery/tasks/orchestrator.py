@@ -65,7 +65,7 @@ def handle_superevent(alert):
                 gracedb.get_event.s()
             )
             |
-            parameter_estimation.s(superevent_id)
+            lalinference.parameter_estimation.s(superevent_id)
         ).apply_async()
 
     elif alert['alert_type'] == 'label_added':
@@ -503,37 +503,6 @@ def _get_lowest_far(superevent_id):
     # https://github.com/getsentry/sentry-python/issues/370
     return min(gracedb.get_event._orig_run(gid)['far'] for gid in
                gracedb.get_superevent._orig_run(superevent_id)["gw_events"])
-
-
-@app.task(ignore_result=True, shared=False)
-def parameter_estimation(far_event, superevent_id):
-    """Tasks for Parameter Estimation Followup with LALInference
-
-    This consists of the following steps:
-
-    1.   Prepare and upload an ini file which is suitable for the target event.
-    2.   Start Parameter Estimation if FAR is smaller than the PE threshold.
-    """
-    far, event = far_event
-    preferred_event_id = event['graceid']
-    # FIXME: it will be better to start parameter estimation for 'burst'
-    # events.
-    if event['group'] == 'CBC' and event['search'] != 'MDC':
-        canvas = lalinference.pre_pe_tasks(event, superevent_id)
-        if far <= app.conf['pe_threshold']:
-            canvas |= lalinference.start_pe.s(preferred_event_id,
-                                              superevent_id)
-        else:
-            canvas |= gracedb.upload.si(
-                          filecontents=None, filename=None,
-                          graceid=superevent_id,
-                          message='FAR is larger than the PE threshold, '
-                                  '{}  Hz. Parameter Estimation will not '
-                                  'start.'.format(app.conf['pe_threshold']),
-                          tags='pe'
-                      )
-
-        canvas.apply_async()
 
 
 @app.task(ignore_result=True, shared=False)

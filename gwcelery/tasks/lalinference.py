@@ -140,7 +140,7 @@ def _find_appropriate_cal_env(trigtime, dir_name):
 
 
 @app.task(shared=False)
-def prepare_ini(frametype_dict, event, superevent_id=None):
+def prepare_ini(frametype_dict, event, conf='default', superevent_id=None):
     """Determine an appropriate PE settings for the target event and return ini
     file content
     """
@@ -151,6 +151,7 @@ def prepare_ini(frametype_dict, event, superevent_id=None):
     singleinspiraltable = event['extra_attributes']['SingleInspiral']
     trigtime = event['gpstime']
     ini_settings = {
+        'configuration': conf,
         'service_url': gracedb.client._service_url,
         'types': frametype_dict,
         'channels': app.conf['strain_channel_names'],
@@ -181,17 +182,10 @@ def prepare_ini(frametype_dict, event, superevent_id=None):
         gracedb.upload.delay(
             ini_rota, filename=ini_name, graceid=superevent_id,
             message='Automatically generated LALInference configuration file'
-                    ' for this event.',
+                    ' for this event with {} settings.'.format(conf),
             tags='pe')
 
     return ini_online
-
-
-def pre_pe_tasks(event, superevent_id):
-    """Return canvas of tasks executed before parameter estimation starts"""
-    return query_data.s(event['gpstime']).on_error(
-        upload_no_frame_files.s(superevent_id)
-    ) | prepare_ini.s(event, superevent_id)
 
 
 @app.task(shared=False)
@@ -387,7 +381,7 @@ def clean_up(rundir):
 
 
 @app.task(ignore_result=True, shared=False)
-def dag_finished(rundir, preferred_event_id, superevent_id):
+def dag_finished(rundir, preferred_event_id, superevent_id, conf='default'):
     """Upload PE results and clean up run directory
 
     Parameters
@@ -420,12 +414,14 @@ def dag_finished(rundir, preferred_event_id, superevent_id):
             ),
             _upload_result(
                 pe_results_path, 'extrinsic.png', superevent_id,
-                'Corner plot for extrinsic parameters', 'pe',
+                'Corner plot for extrinsic parameters from PE'
+                'with {} settings.'.format(conf), 'pe',
                 'LALInference.extrinsic.png'
             ),
             _upload_result(
                 pe_results_path, 'sourceFrame.png', superevent_id,
-                'Corner plot for source frame parameters', 'pe',
+                'Corner plot for source frame parameters from PE'
+                'with {} settings'.format(conf), 'pe',
                 'LALInference.intrinsic.png'
             )
         ) | gracedb.create_label.si('PE_READY', superevent_id) |
@@ -445,7 +441,7 @@ def _download_psd(gid):
 
 
 @app.task(ignore_result=True, shared=False)
-def start_pe(ini_contents, preferred_event_id, superevent_id):
+def start_pe(ini_contents, preferred_event_id, superevent_id, conf='default'):
     """Run LALInference on a given event.
 
     Parameters
@@ -460,7 +456,7 @@ def start_pe(ini_contents, preferred_event_id, superevent_id):
     gracedb.upload.delay(
         filecontents=None, filename=None, graceid=superevent_id,
         message=('starting LALInference online parameter estimation '
-                 'for {}').format(preferred_event_id),
+                 'for {} with {} settings').format(preferred_event_id, conf),
         tags='pe'
     )
 
@@ -468,7 +464,7 @@ def start_pe(ini_contents, preferred_event_id, superevent_id):
     lalinference_dir = os.path.expanduser('~/.cache/lalinference')
     mkpath(lalinference_dir)
     rundir = tempfile.mkdtemp(dir=lalinference_dir,
-                              prefix='{}_'.format(superevent_id))
+                              prefix='{}_{}_'.format(superevent_id, conf))
     # give permissions to read the files under the run directory so that PE
     # ROTA people can check the status of parameter estimation.
     os.chmod(rundir, 0o755)
@@ -485,5 +481,54 @@ def start_pe(ini_contents, preferred_event_id, superevent_id):
             job_error_notification.s(superevent_id, rundir)
         )
         |
-        dag_finished.si(rundir, preferred_event_id, superevent_id)
+        dag_finished.si(rundir, preferred_event_id, superevent_id, conf)
     ).delay()
+
+
+@app.task(ignore_result=True, shared=False)
+def parameter_estimation(far_event, superevent_id):
+    """Tasks for Parameter Estimation Followup with LALInference
+
+    This consists of the following steps:
+
+    1.   Prepare and upload an ini file which is suitable for the target event.
+    2.   Start Parameter Estimation if FAR is smaller than the PE threshold.
+    """
+    far, event = far_event
+    preferred_event_id = event['graceid']
+    # FIXME: it will be better to start parameter estimation for 'burst'
+    # events.
+    if event['group'] != 'CBC' or event['search'] == 'MDC':
+        return
+    need_quick_bns = 0.8706 <= \
+        event['extra_attributes']['CoincInspiral']['mchirp'] <= 1.7411
+    if far <= app.conf['pe_threshold']:
+        canvas = prepare_ini.s(event, 'default', superevent_id) | \
+            start_pe.s(preferred_event_id, superevent_id, 'default')
+        if need_quick_bns:
+            canvas = group(
+                canvas,
+                prepare_ini.s(event, 'quick_bns', superevent_id) | \
+                    start_pe.s(preferred_event_id, superevent_id, 'quick_bns')
+            )
+    else:
+        canvas = prepare_ini.s(event, 'default', superevent_id)
+        if need_quick_bns:
+            canvas = group(
+                canvas,
+                prepare_ini.s(event, 'quick_bns', superevent_id)
+            )
+        canvas |= gracedb.upload.si(
+            filecontents=None, filename=None, graceid=superevent_id, tags='pe',
+            message='FAR is larger than the PE threshold, {}  Hz. '
+                    'Parameter '
+                    'Estimation will not start.'.format(app.conf['pe_threshold'])
+        )
+
+    (
+        query_data.s(event['gpstime']).on_error(
+            upload_no_frame_files.s(superevent_id)
+        )
+        |
+        canvas
+    ).apply_async()

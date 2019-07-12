@@ -91,9 +91,7 @@ def test_handle_superevent(monkeypatch, toy_3d_fits_filecontents,  # noqa: F811
     plot_volume = Mock()
     plot_allsky = Mock()
     send = Mock()
-    query_data = Mock()
-    prepare_ini = Mock()
-    start_pe = Mock()
+    parameter_estimation = Mock()
     create_voevent = Mock(return_value='S1234-1-Preliminary.xml')
     create_label = Mock()
     create_tag = Mock()
@@ -113,12 +111,8 @@ def test_handle_superevent(monkeypatch, toy_3d_fits_filecontents,  # noqa: F811
                         get_superevent)
     monkeypatch.setattr('gwcelery.tasks.circulars.create_initial_circular.run',
                         create_initial_circular)
-    monkeypatch.setattr('gwcelery.tasks.lalinference.query_data.run',
-                        query_data)
-    monkeypatch.setattr('gwcelery.tasks.lalinference.prepare_ini.run',
-                        prepare_ini)
-    monkeypatch.setattr('gwcelery.tasks.lalinference.start_pe.run',
-                        start_pe)
+    monkeypatch.setattr('gwcelery.tasks.lalinference.parameter_estimation.run',
+                        parameter_estimation)
     monkeypatch.setattr('gwcelery.tasks.gracedb.create_label._orig_run',
                         create_label)
 
@@ -144,12 +138,7 @@ def test_handle_superevent(monkeypatch, toy_3d_fits_filecontents,  # noqa: F811
         create_initial_circular.assert_called_once()
 
     if alert_type == 'new' and group == 'CBC':
-        query_data.assert_called_once()
-        prepare_ini.assert_called_once()
-        if far <= app.conf['pe_threshold']:
-            start_pe.assert_called_once()
-        else:
-            start_pe.assert_not_called()
+        parameter_estimation.assert_called_once()
 
 
 @patch('gwcelery.tasks.gracedb.get_labels', return_value={'DQV', 'ADVREQ'})
