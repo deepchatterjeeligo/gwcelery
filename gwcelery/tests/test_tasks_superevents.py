@@ -1,5 +1,8 @@
+from celery import exceptions
 import pytest
 from unittest.mock import patch
+
+from ligo.gracedb import rest
 
 from ..tasks import gracedb, superevents
 from . import resource_json
@@ -159,7 +162,11 @@ def test_update_preferred_event(mock_db):
                    offline=False,
                    superevent="some_superevent",
                    far=1e-30,
-                   extra_attributes=dict(CoincInspiral=dict(snr=30.0)))
+                   extra_attributes=dict(
+                       CoincInspiral=dict(snr=30.0),
+                       SingleInspiral=[
+                           {'ifo': ifo} for ifo in "I1,J1,K1,L1,M1".split(',')
+                       ]))
     with patch.object(gracedb.client, 'updateSuperevent') as p:
         superevents._update_superevent('S0039',
                                        'T0212',
@@ -196,7 +203,8 @@ def _mock_event(event):
             "far": 1.e-31,
             "instruments": "H1,L1",
             "extra_attributes": {
-                "CoincInspiral": {"snr": 20}
+                "CoincInspiral": {"snr": 20},
+                "SingleInspiral": [{"ifo": ifo} for ifo in ["H1", "L1"]]
             },
             "offline": False
         }
@@ -222,7 +230,8 @@ def test_upload_same_event():
             "far": 1.e-31,
             "instruments": "H1,L1",
             "extra_attributes": {
-                "CoincInspiral": {"snr": 20}
+                "CoincInspiral": {"snr": 20},
+                "SingleInspiral": [{"ifo": ifo} for ifo in ["H1", "L1"]]
             },
             "offline": False
         }
@@ -258,6 +267,31 @@ def test_parse_trigger_raising():
         superevents.handle(garbage_payload)
 
 
+@patch('gwcelery.tasks.gracedb.create_superevent',
+       side_effect=rest.HTTPError(502, "Bad Gateway", "Bad Gateway"))
+def test_raising_http_error(failing_create_superevent):
+    payload = {
+        "uid": "G000003",
+        "alert_type": "new",
+        "description": "",
+        "object": {
+            "graceid": "G000003",
+            "gpstime": 100.0,
+            "pipeline": "gstlal",
+            "group": "CBC",
+            "far": 1.e-31,
+            "instruments": "H1,L1",
+            "extra_attributes": {
+                "CoincInspiral": {"snr": 20}
+            },
+            "offline": False
+        }
+    }
+    with pytest.raises(gracedb.RetryableHTTPError):
+        with pytest.raises(exceptions.Retry):
+            superevents.handle.delay(payload)
+
+
 def test_parse_trigger_cbc_1(mock_db):
     """New trigger G000000, less significant than already
     existing superevent. Superevent window much larger than event
@@ -274,7 +308,9 @@ def test_parse_trigger_cbc_1(mock_db):
                            'far': 3e-09,
                            'instruments': 'H1,L1',
                            'extra_attributes': {
-                               'CoincInspiral': {'snr': 10.0}}},
+                               'CoincInspiral': {'snr': 10.0},
+                               'SingleInspiral': [
+                                   {'ifo': ifo} for ifo in ['H1', 'L1']]}},
                    alert_type='new',
                    uid='G000000')
     with patch.object(gracedb.client, 'addEventToSuperevent') as p1, \
@@ -297,7 +333,9 @@ def test_parse_trigger_cbc_2(mock_db):
                            'far': 3e-31,
                            'instruments': 'H1,L1',
                            'extra_attributes': {
-                               'CoincInspiral': {'snr': 30.0}}},
+                               'CoincInspiral': {'snr': 30.0},
+                               'SingleInspiral': [
+                                   {"ifo": ifo} for ifo in ["H1", "L1"]]}},
                    alert_type='new',
                    uid='G000003')
     # addEventToSuperevent should be called
@@ -323,7 +361,10 @@ def test_parse_trigger_cbc_3(mock_db):
                            'far': 3e-31,
                            'instruments': 'H1,L1,V1',
                            'extra_attributes': {
-                               'CoincInspiral': {'snr': 12.0}}},
+                               'CoincInspiral': {'snr': 12.0},
+                               'SingleInspiral': [
+                                   {"ifo": ifo} for ifo in
+                                   ["H1", "L1", "V1"]]}},
                    alert_type='new',
                    uid='G000001')
     # G000001 absent in any superevent window, new superevent created
@@ -344,16 +385,17 @@ def test_parse_trigger_cbc_4(mock_db):
                            'far': 5.5e-02,
                            'instruments': 'H1,L1,V1',
                            'extra_attributes': {
-                               'CoincInspiral': {'snr': 4.0}}},
+                               'CoincInspiral': {'snr': 4.0},
+                               'SingleInspiral': [
+                                   {"ifo": ifo} for ifo in
+                                   ["H1", "L1", "V1"]]}},
                    alert_type='new',
                    uid='G000002')
     superevents.handle(payload)
     # neither method is called due to low far
-    with patch.object(gracedb.client, 'addEventToSuperevent') as p1, \
-            patch.object(gracedb.client, 'createSuperevent') as p2:
+    with patch.object(superevents, 'process') as mock_process:
         superevents.handle(payload)
-        p1.assert_not_called()
-        p2.assert_not_called()
+        mock_process.assert_not_called()
 
 
 def test_parse_trigger_burst_1(mock_db):
@@ -491,7 +533,9 @@ def test_S190421ar_spiir_scenario(mock_db):    # noqa: N802
                            'offline': False,
                            'extra_attributes': {
                                'CoincInspiral': {
-                                   'snr': 10.5107507705688}}},
+                                   'snr': 10.5107507705688},
+                               'SingleInspiral': [
+                                   {"ifo": ifo} for ifo in ["H1", "L1"]]}},
                    alert_type='new',
                    uid='G330298')
     with patch.object(gracedb.client, 'addEventToSuperevent') as p1, \

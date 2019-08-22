@@ -4,7 +4,7 @@ superevents.
 *   There is serial processing of triggers from low latency pipelines.
 *   Dedicated **superevent** queue for this purpose.
 *   Primary logic to respond to low latency triggers contained in
-    :meth:`handle` function.
+    :meth:`process` function.
 """
 from celery.utils.log import get_task_logger
 from ligo.segments import segment, segmentlist
@@ -21,13 +21,12 @@ log = get_task_logger(__name__)
                  'cbc_mbtaonline',
                  'burst_olib',
                  'burst_cwb',
-                 queue='superevent',
                  shared=False)
 def handle(payload):
-    """LVAlert handler for superevent manager.
-
-    Receives payload from test and production nodes and serially processes them
-    to create/modify superevents."""
+    """Respond to lvalert nodes from low-latency search
+    pipelines and delegate to :meth:`process` for
+    superevent management.
+    """
     if payload['alert_type'] != 'new':
         return
 
@@ -41,10 +40,26 @@ def handle(payload):
         return
     else:
         if far > app.conf['superevent_far_threshold']:
-            log.info("Skipping processing of %s because of low FAR", gid)
+            log.info("Skipping processing of %s because of high FAR", gid)
             return
+    process.delay(payload)
 
+
+@gracedb.task(queue='superevent', shared=False)
+@gracedb.catch_retryable_http_errors
+def process(payload):
+    """
+    Respond to `payload` and serially processes them
+    to create new superevents, add events to existing ones
+    and update superevent parameters.
+
+    Parameters
+    ----------
+    payload : dict
+        LVAlert payload
+    """
     event_info = payload['object']
+    gid = payload['uid']
 
     if event_info.get('search') == 'MDC':
         category = 'mdc'
@@ -68,7 +83,6 @@ def handle(payload):
     t_0, t_start, t_end = get_ts(event_info)
 
     if sid is None:
-        log.debug('Entered 1st if')
         event_segment = _Event(event_info['gpstime'],
                                t_start, t_end,
                                event_info['graceid'],
@@ -188,7 +202,27 @@ def get_snr(event):
 
 
 def get_instruments(event):
-    """Get the participating instruments from the LVAlert packet.
+    """Get the instruments that contributed data to an event.
+
+    Parameters
+    ----------
+    event : dict
+        Event dictionary (e.g., the return value from
+        :meth:`gwcelery.tasks.gracedb.get_event`).
+
+    Returns
+    -------
+    set
+        The set of instruments that contributed to the event.
+
+    """
+    attribs = event['extra_attributes']['SingleInspiral']
+    ifos = {single['ifo'] for single in attribs}
+    return ifos
+
+
+def get_instruments_in_ranking_statistic(event):
+    """Get the instruments that contribute to the false alarm rate.
 
     Parameters
     ----------
@@ -280,8 +314,15 @@ def keyfunc(event):
         group_rank = ['cbc', 'burst'].index(group)
     except ValueError:
         group_rank = float('inf')
-    tie_breaker = -get_snr(event) if group == 'cbc' else event['far']
-    return not should_publish(event), group_rank, tie_breaker
+
+    if group == 'cbc':
+        ifo_rank = -len(get_instruments(event))
+        tie_breaker = -get_snr(event)
+    else:
+        ifo_rank = 0
+        tie_breaker = event['far']
+
+    return not should_publish(event), group_rank, ifo_rank, tie_breaker
 
 
 def _update_superevent(superevent_id, preferred_event, new_event_dict,

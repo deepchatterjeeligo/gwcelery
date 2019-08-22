@@ -14,10 +14,12 @@ from matplotlib import pyplot as plt
 from . import gracedb
 from ..import app
 from ..jinja import env
+from ..util.cmdline import handling_system_exit
 from ..util.tempfile import NamedTemporaryFile
 
 
-def annotate_fits(versioned_filename, graceid, tags):
+@app.task(ignore_result=True, shared=False)
+def annotate_fits(filecontents, versioned_filename, graceid, tags):
     """Perform annotations on a sky map.
 
     This function downloads a FITS file and then generates and uploads all
@@ -37,7 +39,7 @@ def annotate_fits(versioned_filename, graceid, tags):
         '{versioned_filename}">{versioned_filename}</a>').format(
             graceid=graceid, versioned_filename=versioned_filename)
 
-    return group(
+    group(
         fits_header.s(versioned_filename) |
         gracedb.upload.s(
             filebase + '.html', graceid, header_msg, tags),
@@ -48,7 +50,7 @@ def annotate_fits(versioned_filename, graceid, tags):
 
         annotate_fits_volume.s(
             filebase + '.volume.png', graceid, volume_msg, tags)
-    )
+    ).delay(filecontents)
 
 
 def is_3d_fits_file(filecontents):
@@ -85,13 +87,14 @@ def plot_allsky(filecontents):
     # https://github.com/astropy/astropy/issues/8004.
     with NamedTemporaryFile(mode='rb', suffix='.png') as pngfile, \
             NamedTemporaryFile(content=filecontents) as fitsfile, \
-            plt.style.context({'text.usetex': False}, after_reset=True):
+            plt.style.context({'text.usetex': False}, after_reset=True), \
+            handling_system_exit():
         ligo_skymap_plot.main([fitsfile.name, '-o', pngfile.name,
                                '--annotate', '--contour', '50', '90'])
         return pngfile.read()
 
 
-@app.task(queue='openmp', shared=False)
+@app.task(priority=1, queue='openmp', shared=False)
 def plot_volume(filecontents):
     """Plot a 3D volume rendering of a sky map using the command-line tool
     :doc:`ligo-skymap-plot-volume <ligo/skymap/tool/ligo_skymap_plot_volume>`.
@@ -100,7 +103,8 @@ def plot_volume(filecontents):
     # https://github.com/astropy/astropy/issues/8004.
     with NamedTemporaryFile(mode='rb', suffix='.png') as pngfile, \
             NamedTemporaryFile(content=filecontents) as fitsfile, \
-            plt.style.context({'text.usetex': False}, after_reset=True):
+            plt.style.context({'text.usetex': False}, after_reset=True), \
+            handling_system_exit():
         ligo_skymap_plot_volume.main([fitsfile.name, '-o',
                                       pngfile.name, '--annotate'])
         return pngfile.read()
@@ -112,7 +116,8 @@ def flatten(filecontents, filename):
     more common IMPLICIT indexing using the command-line tool
     :doc:`ligo-skymap-flatten <ligo/skymap/tool/ligo_skymap_flatten>`."""
     with NamedTemporaryFile(content=filecontents) as infile, \
-            tempfile.TemporaryDirectory() as tmpdir:
+            tempfile.TemporaryDirectory() as tmpdir, \
+            handling_system_exit():
         outfilename = os.path.join(tmpdir, filename)
         ligo_skymap_flatten.main([infile.name, outfilename])
         return open(outfilename, 'rb').read()
@@ -122,7 +127,8 @@ def flatten(filecontents, filename):
 def skymap_from_samples(samplefilecontents):
     """Generate multi-resolution fits file from samples"""
     with NamedTemporaryFile(content=samplefilecontents) as samplefile, \
-            tempfile.TemporaryDirectory() as tmpdir:
+            tempfile.TemporaryDirectory() as tmpdir, \
+            handling_system_exit():
         ligo_skymap_from_samples.main(['-o', tmpdir, samplefile.name])
         with open(os.path.join(tmpdir, 'skymap.fits'), 'rb') as f:
             return f.read()

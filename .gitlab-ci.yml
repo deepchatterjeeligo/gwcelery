@@ -12,6 +12,14 @@ variables:
   # at all.
   GIT_STRATEGY: none
 
+.in-tmpdir: &in-tmpdir
+  before_script:
+    - WORKING_DIRECTORY="$(mktemp -d)"
+    - cd "${WORKING_DIRECTORY}"
+  after_script:
+    - cd "${CI_PROJECT_DIR}"
+    - rm -rf "${WORKING_DIRECTORY}"
+
 stages:
   - dist
   - test
@@ -38,10 +46,10 @@ sdist:
 bdist:
   image: python:3.6-slim
   stage: test
+  <<: *in-tmpdir
   script:
-    - tar --strip-components 1 -xf *.tar.*
-    - python setup.py bdist_wheel
-    - mv dist/* .
+    - tar --strip-components 1 -xf ${CI_PROJECT_DIR}/*.tar.*
+    - python setup.py bdist_wheel --dist-dir ${CI_PROJECT_DIR}
   dependencies:
     - sdist
   artifacts:
@@ -66,6 +74,9 @@ bdist:
     - docker build -t $IMAGE_TAG .
     - docker push $IMAGE_TAG
     - if [ "${CI_COMMIT_TAG:0:1}" = "v" ]; then docker tag $IMAGE_TAG ${IMAGE_TAG%:*}:latest; docker push ${IMAGE_TAG%:*}:latest; fi
+  only:
+    changes:
+      - requirements.txt
 dependencies/python3.6:
   <<: *dependencies
 dependencies/python3.7:
@@ -75,12 +86,12 @@ dependencies/python3.7:
 .test: &test
   stage: test
   coverage: '/^TOTAL\s+.*\s+(\d+\.?\d*)%/'
-  before_script:
-    - apt-get update -qq && apt-get install -y -qq redis-server
+  <<: *in-tmpdir
   script:
-    - tar --strip-components 1 -xf *.tar.*
+    - apt-get update -qq && apt-get install -y -qq redis-server
+    - tar --strip-components 1 -xf ${CI_PROJECT_DIR}/*.tar.*
     - pip install pytest-cov -r test-requirements.txt
-    - python setup.py test --addopts='-vv --cov --cov-report=html --cov-report=term --junit-xml=junit.xml'
+    - python setup.py test --addopts="-vv --cov --cov-report=html:${CI_PROJECT_DIR}/htmlcov --cov-report=term --junit-xml=${CI_PROJECT_DIR}/junit.xml"
   dependencies:
     - sdist
   artifacts:
@@ -98,8 +109,8 @@ test/python3.7:
 lint:
   image: $CI_REGISTRY_IMAGE/dependencies/python3.6:$CI_COMMIT_REF_NAME
   stage: test
-  before_script:
-    - tar --strip-components 1 -xf *.tar.*
+  variables:
+    GIT_STRATEGY: fetch
   dependencies:
     - sdist
 
@@ -168,10 +179,10 @@ docker/python3.7:
 doc:
   image: python:3.6-slim
   stage: test
-  before_script:
-    - apt-get update -qq && apt-get install -y -qq graphviz
+  <<: *in-tmpdir
   script:
-    - tar --strip-components 1 -xf *.tar.*
+    - apt-get update -qq && apt-get install -y -qq graphviz
+    - tar --strip-components 1 -xf ${CI_PROJECT_DIR}/*.tar.*
     - python setup.py build_sphinx
   dependencies:
     - sdist
@@ -270,16 +281,15 @@ release:
     # Figure out which user to log in as (emfollow or emfollow-playground)
     - mkdir -p ~/.ssh
     - |
-      echo Host emfollow > ~/.ssh/config
-      case $CI_ENVIRONMENT_NAME in
-        */CIT) echo HostName emfollow.ligo.caltech.edu >> ~/.ssh/config;;
-        */LHO) echo HostName emfollow.ligo-wa.caltech.edu >> ~/.ssh/config;;
-        */LLO) echo HostName emfollow.ligo-la.caltech.edu >> ~/.ssh/config;;
-      esac
-      case $CI_ENVIRONMENT_NAME in
-        production/*) echo User emfollow >> ~/.ssh/config;;
-        playground/*) echo User emfollow-playground >> ~/.ssh/config;;
-      esac
+      cat > ~/.ssh/config <<EOF
+      Host emfollow-playground.*
+      User emfollow-playground
+      Host emfollow.*
+      User emfollow
+      EOF
+    - REMOTE_HOST=${CI_ENVIRONMENT_URL##*//}
+    - REMOTE_HOST=${REMOTE_HOST%%/*}
+    - echo $REMOTE_HOST
 
 # Continuous deployment.
 # Note that all deployments except playground/CIT are manual.
@@ -289,26 +299,31 @@ release:
   script:
     # Update the repository.
     - |
-      gsissh -T emfollow bash <<EOF
+      gsissh -T $REMOTE_HOST bash <<EOF
       set -e
       if [ ! -d .git ]; then git init; fi
+      git fetch ${CI_REPOSITORY_URL}
       git fetch --tags ${CI_REPOSITORY_URL}
       git checkout -f $CI_COMMIT_SHA
       EOF
     # Reinstall and start (new session to reload bashrc).
     - |
-      gsissh -T emfollow bash <<EOF
+      gsissh -T $REMOTE_HOST bash <<EOF
       . .bashrc
       set -e
       pip install --upgrade pipenv pip setuptools
       pipenv install --system --deploy
+      # FIXME: remove pip uninstall temporary directories left behind due to
+      # bug with pip on NFS. See https://github.com/pypa/pip/issues/6327
+      chmod -R ug+rwx .local/lib/python3.6/site-packages/~* || true
+      rm -rf .local/lib/python3.6/site-packages/~* || true
       gwcelery condor resubmit
       EOF
 
 .deploy-stop: &deploy-stop
   <<: *deploy-common
   script: |
-    gsissh -T emfollow bash <<EOF
+    gsissh -T $REMOTE_HOST bash <<EOF
     . .bashrc
     set -e
     gwcelery condor rm
@@ -335,7 +350,7 @@ deploy to playground at CIT:
   environment:
     name: playground/CIT
     on_stop: stop deployment on playground at CIT
-    url: https://emfollow.ligo.caltech.edu/playground/flower
+    url: https://emfollow-playground.ligo.caltech.edu/flower
 
 deploy to playground at LHO:
   <<: *deploy-start
@@ -343,7 +358,7 @@ deploy to playground at LHO:
   environment:
     name: playground/LHO
     on_stop: stop deployment on playground at LHO
-    url: https://emfollow.ligo-wa.caltech.edu/playground/flower
+    url: https://emfollow-playground.ligo-wa.caltech.edu/flower
 
 stop deployment on production at CIT:
   <<: *deploy-stop

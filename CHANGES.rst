@@ -1,7 +1,149 @@
 Changelog
 =========
 
-0.7.0 (unreleased)
+0.8.5 (unreleased)
+------------------
+
+-   Make raven.py tests more robust and have increased coverage.
+
+0.8.4 (2019-08-16)
+------------------
+
+-   Fixed a bug in ``gracedb.create_tag`` to handle the scenario when multiple
+    log messages exist for the same filename. The tag is applied to the most
+    recent log message.
+
+-   Retry GraceDB API calls that fail due to receiving incomplete or malformed
+    HTTP responses, as indicated by ``http.client.HTTPException`` exceptions.
+    This should work around the increased incidence of ``RemoteDisconnected``
+    exceptions that we have seen recently, and that caused a delay in sending
+    out the preliminary alert for S190814bv.
+
+0.8.3 (2019-08-09)
+------------------
+
+-   Enable Redis integration for Sentry error reporting.
+
+-   Downgrade lalsuite to 6.54 since ``lalinference_pipe`` in 6.59 has a minor
+    bug, which breaks automatic parameter estimation.
+
+-   Include the number of participating detectors in the preferred event
+    selection criterion for compact binaries: 3-detector events should be
+    preferred over 2-detector events, and 2-detector events over 1-detector
+    events, on the basis of more accurate localization. Ties are still broken
+    by SNR.
+
+-   Catch ``SystemExit`` exceptions from Python command line tools called in
+    Celery tasks and re-raise them as ``RuntimeError`` exceptions so that they
+    do not cause the workers to exit.
+
+0.8.2 (2019-08-02)
+------------------
+
+-   Apply the ``public`` tag to data products before sending out an update GCN
+    notice. This will prevent human errors related to not exposing LALInference
+    files before sending a GCN notice.
+
+-   Don't read the entire HTTP response from GraceDB POST requests. We only
+    need the HTTP status code. This change might speed up GraceDB API calls a
+    little bit.
+
+-   Increase preliminary alert timeout back to 5 minutes.
+
+-   Make ``gracedb.create_superevent``, ``gracedb.update_superevent`` and
+    ``gracedb.add_event_to_superevent`` idempotent by catching the ``HTTPError``
+    from GraceDB that occurs if the superevent has already been created.
+
+-   Fix bug where neither the space-time nor temporal coincidence far is
+    calculated if external sky map is unavailable.
+
+-   Update ligo.skymap to 0.1.9. This version changes the data type of the
+    multi-resolution HEALPix format's ``UNIQ`` column from an unsigned integer
+    to a signed integer.
+
+    Starting with this version, the Linux builds of ligo.skymap are compiled
+    and optimized using the Intel C Compiler.
+
+-   Change the trials factor for CBC searches to 4, since SPIIR is performing
+    a single search, and that for burst to 3, since oLIB is not currently in
+    operation.
+
+0.8.1 (2019-07-29)
+------------------
+
+-   Downgrade lalsuite to 6.59.
+
+-   Revert change that tried to fix incorrect key for querying external
+    events. The keys were correct before.
+
+0.8.0 (2019-07-26)
+------------------
+
+-   Assign ``gwcelery.tasks.skymaps.plot_volume`` tasks a reduced Celery
+    priority as compared to ``gwcelery.tasks.bayestar.localize`` so that the
+    latter are given preference. This ought to speed up the preparation of
+    preliminary GCN notices because only the latter are required for GCNs but
+    both kinds of tasks compete for slots in the resource-intensive OpenMP
+    queue.
+
+-   Reduce priority for CBC annotation tasks for events that do not pass the
+    public alert threshold.
+
+-   Update lalsuite to 6.60.
+
+-   Ensure gracedb calls to create and update superevents are retried in
+    the event of transient GraceDB API errors.
+
+-   Update ligo-raven version to 1.15. Apply EM_COINC label in raven.py to
+    give more control and prevent race conditions.
+
+-   Use the space-time coincidence FAR as the default for RAVEN, use the
+    temporal coincidence FAR when sky maps are not available.
+
+-   Check if GRB is sub-threshold, set search to be 'SubGRB'. Pass search
+    through external triggers pipeline and RAVEN.
+
+-   Tune Celery's ``result_expires`` setting from its default value of one day
+    to five minutes. Since we pass large byte strings as task arguments and
+    return values, one day is too long to keep task tombstones in the database.
+    This adjustment should reduce the memory footprint of the Redis server
+    during periods with very high rates of GraceDB uploads.
+
+    The downside is that task details will remain browsable in Flower for a
+    much shorter period.
+
+-   Remove p_astro_gstlal.py module, corresponding test modules, and
+    documentation; p_astro will be reported as a pipeline product from gstlal.
+    The computation of p_astro for all other pipelines is unaffected.
+
+-   Fix EM_COINC bug where it is being over-applied to superevents.
+
+-   Fix bug where wrong key was called for querying external events.
+
+0.7.1 (2019-07-12)
+------------------
+
+-   The initial alert workflow will now consider only ``*.fits.gz`` sky maps
+    and not ``*.fits`` sky maps for GCN Notices. It was an oversight that we
+    did not exclude ``*.fits`` files from the list of extensions to consider
+    when we updated the handling of multiresolution sky maps.
+
+-   Catch and retry HTTP 429 ("Too Many Requests") errors from GraceDB.
+
+-   Enable Sentry integration for Tornado in order to capture errors from the
+    Flower console.
+
+-   Fix file extensions for LALInference sky map PNG files: they should be
+    named ``LALInference.png``, not ``LALInference.multiorder.png``.
+
+-   Increase the Redis server's log verbosity in order to help diagnose Redis
+    client connection dropouts.
+
+-   Run sky map plotting and annotation tasks asynchronously so that they do
+    not block sending preliminary alerts. Their outputs are only for human
+    consumption; they are not needed in order to prepare GCN Notices.
+
+0.7.0 (2019-06-21)
 ------------------
 
 -   Trigger a preliminary alert for a superevent upon the first time that the
@@ -13,6 +155,9 @@ Changelog
     event that was selected some tens of seconds later did.
 
 -   Decrease preliminary alert timeout to one minute.
+
+-   The combined effect of these changes should be to decrease the latency for
+    producing preliminary alerts from 7 minutes to 2 minutes.
 
 0.6.3 (2019-06-14)
 ------------------
@@ -42,7 +187,7 @@ Changelog
     failures: amqp <= 2.4.2, kombu <= 4.5.0, vine <= 1.3.0.
 
 -   Prevent subthreshold GRBs with low reliability from being processed as
-    external events. 
+    external events.
 
 -   Add a task in orchestrator.py to generate FITS files and sky map images
     automatically whenever an HDF5 posterior samples file is uploaded.
@@ -148,7 +293,7 @@ Changelog
     ``gwcelery.tasks.detchar.check_vectors`` adds one of the ``DQOK`` or
     ``DQV`` labels, it will now first remove the other label.
 
--   Change exception in VOEevent parsing of Fermi subtreshold alerts to 
+-   Change exception in VOEevent parsing of Fermi subtreshold alerts to
     match real incoming alerts.
 
 -   Update Celery to 4.3.0.
@@ -643,7 +788,7 @@ Changelog
 
 -   Preliminary GCN is not sent for superevents created from offline gw events.
 
--   Add ``dqr_json`` function to ``gwcelery.tasks.detchar``, which uploads a 
+-   Add ``dqr_json`` function to ``gwcelery.tasks.detchar``, which uploads a
     DQR-compatible json to GraceDB with the results of the detchar checks.
 
 -   Depend on ligo.skymap >= 0.0.17.

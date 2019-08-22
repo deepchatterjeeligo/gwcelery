@@ -18,12 +18,23 @@ import getpass
 import os
 
 # Celery application settings.
-# Use pickle serializer, because it supports byte values.
 
+# Task tombstones expire after 5 minutes.
+# Celery's default setting of 1 day could cause the Redis database to grow too
+# large because we pass large byte strings as task arguments and return values.
+result_expires = 300
+
+# Use pickle serializer, because it supports byte values.
 accept_content = ['json', 'pickle']
 event_serializer = 'json'
 result_serializer = 'pickle'
 task_serializer = 'pickle'
+
+# Task priority settings.
+task_inherit_parent_priority = True
+task_default_priority = 0
+task_queue_max_priority = 1
+priority_steps = list(range(task_queue_max_priority + 1))
 
 # GWCelery-specific settings.
 
@@ -46,7 +57,7 @@ voevent_broadcaster_whitelist = []
 """List of hosts from which the broker will accept connections.
 If empty, then completely disable the broker's broadcast capability."""
 
-voevent_receiver_address = ''
+voevent_receiver_address = '68.169.57.253:8099'
 """The VOEvent listener will connect to this address to receive GCNs. For
 options, see `GCN's list of available VOEvent servers
 <https://gcn.gsfc.nasa.gov/voevent.html#tc2>`_. If this is an empty string,
@@ -87,13 +98,12 @@ preliminary_alert_far_threshold = {'cbc': 1 / (60 * 86400),
 """Group specific maximum false alarm rate to consider
 sending preliminary alerts."""
 
-preliminary_alert_trials_factor = dict(cbc=5.0, burst=4.0)
+preliminary_alert_trials_factor = dict(cbc=4.0, burst=3.0)
 """Trials factor corresponding to trigger categories. For CBC and Burst, trials
-factor is the number of pipelines. CBC pipelines are gstlal, pycbc, mbtaonline,
-spiir-highmass, spiir-lowmass. Burst searches are cwb.allsky, cwb.bbh, cwb.imbh
-and olib.allsky."""
+factor is the number of pipelines. CBC pipelines are gstlal, pycbc, mbtaonline
+and spiir. Burst searches are cwb.allsky, cwb.bbh and cwb.imbh."""
 
-orchestrator_timeout = 60.0
+orchestrator_timeout = 300.0
 """The orchestrator will wait this many seconds from the time of the
 creation of a new superevent to the time that annotations begin, in order
 to let the superevent manager's decision on the preferred event
@@ -173,26 +183,19 @@ Currently all False, pending iDQ review (should be done before O3).
 
 p_astro_livetime = 14394240
 """livetime (units: sec) corresponding to mean values of Poisson counts.
-   (Used by :mod:`gwcelery.tasks.p_astro_other`)
+   (Used by :mod:`gwcelery.tasks.p_astro`)
 """
 
 p_astro_url = \
     'http://emfollow.ldas.cit/data/H1L1V1-mean_counts-1126051217-61603201.json'
 """URL for mean values of Poisson counts using which p_astro
-is computed. (Used by :mod:`gwcelery.tasks.p_astro_gstlal` and
-:mod:`gwcelery.tasks.p_astro_other`)
-"""
-
-p_astro_weights_url = 'http://emfollow.ldas.cit/data/' \
-    'H1L1V1-weights-bins_686-1126051217-61603201.h5'
-"""URL for template weights using which p_astro
-is computed. (Used by :mod:`gwcelery.tasks.p_astro_gstlal`)
+is computed. (Used by :mod:`gwcelery.tasks.p_astro`)
 """
 
 p_astro_thresh_url = 'http://emfollow.ldas.cit/data/' \
     'H1L1V1-pipeline-far_snr-thresholds.json'
 """URL for pipeline thresholds on FAR and SNR.
-(Used by :mod:`gwcelery.tasks.p_astro_other`)
+(Used by :mod:`gwcelery.tasks.p_astro`)
 """
 
 em_bright_url = 'http://emfollow.ldas.cit/data/em_bright_classifier.pickle'

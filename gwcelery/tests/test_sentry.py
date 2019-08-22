@@ -21,7 +21,10 @@ def netrcfile(monkeypatch, tmpdir):
 @patch('sentry_sdk.init')
 @patch('sentry_sdk.integrations.celery.CeleryIntegration')
 @patch('sentry_sdk.integrations.flask.FlaskIntegration')
-def test_sentry_configure(mock_flask_integration, mock_celery_integration,
+@patch('sentry_sdk.integrations.redis.RedisIntegration')
+@patch('sentry_sdk.integrations.tornado.TornadoIntegration')
+def test_sentry_configure(mock_tornado_integration, mock_redis_integration,
+                          mock_flask_integration, mock_celery_integration,
                           mock_sdk_init, netrcfile, caplog):
     caplog.set_level(logging.ERROR)
     sentry.configure()
@@ -42,4 +45,6 @@ def test_sentry_configure(mock_flask_integration, mock_celery_integration,
         dsn, environment=environment, release=release,
         integrations=[
             mock_celery_integration.return_value,
-            mock_flask_integration.return_value])
+            mock_flask_integration.return_value,
+            mock_redis_integration.return_value,
+            mock_tornado_integration.return_value])

@@ -19,7 +19,7 @@ from . import gcn
 from . import gracedb
 from . import lalinference
 from . import lvalert
-from . import p_astro_gstlal, p_astro_other
+from . import p_astro
 from . import skymaps
 from . import superevents
 
@@ -115,14 +115,14 @@ def handle_superevent(alert):
                  'cbc_mbtaonline',
                  shared=False)
 def handle_cbc_event(alert):
-    """Peform annotations for CBC events that depend on pipeline-specific
+    """Perform annotations for CBC events that depend on pipeline-specific
     matched-filter parameter estimates.
 
     Notes
     -----
 
-    This LVAlert message handler is triggered by updates that include the files
-    ``psd.xml.gz`` and ``ranking_data.xml.gz``. The table below lists which
+    This LVAlert message handler is triggered by updates that include the file
+    ``psd.xml.gz``. The table below lists which
     files are created as a result, and which tasks generate them.
 
     ============================== =====================================================
@@ -130,15 +130,17 @@ def handle_cbc_event(alert):
     ============================== =====================================================
     ``bayestar.multiorder.fits``   :meth:`gwcelery.tasks.bayestar.localize`
     ``em_bright.json``             :meth:`gwcelery.tasks.em_bright.classifier`
-    ``p_astro.json``               :meth:`gwcelery.tasks.p_astro_gstlal.compute_p_astro`
     ============================== =====================================================
     """  # noqa: E501
 
     graceid = alert['uid']
+    priority = 0 if superevents.should_publish(alert['object']) else 1
+
     # em_bright and p_astro calculation
     if alert['alert_type'] == 'new':
         pipeline = alert['object']['pipeline'].lower()
-        instruments = superevents.get_instruments(alert['object'])
+        instruments = superevents.get_instruments_in_ranking_statistic(
+            alert['object'])
         extra_attributes = alert['object']['extra_attributes']
         snr = superevents.get_snr(alert['object'])
         far = alert['object']['far']
@@ -152,25 +154,25 @@ def handle_cbc_event(alert):
         em_bright_task = em_bright.classifier_other
 
         (
-                em_bright_task.si((mass1, mass2, chi1, chi2, snr), graceid)
-                |
-                gracedb.upload.s(
-                    'em_bright.json', graceid,
-                    'em bright complete', ['em_bright', 'public']
-                )
-                |
-                gracedb.create_label.si('EMBRIGHT_READY', graceid)
-        ).delay()
+            em_bright_task.si((mass1, mass2, chi1, chi2, snr), graceid)
+            |
+            gracedb.upload.s(
+                'em_bright.json', graceid,
+                'em bright complete', ['em_bright', 'public']
+            )
+            |
+            gracedb.create_label.si('EMBRIGHT_READY', graceid)
+        ).apply_async(priority=priority)
 
         # p_astro calculation for other pipelines
         if pipeline != 'gstlal' or alert['object']['search'] == 'MDC':
             (
-                p_astro_other.compute_p_astro.s(snr,
-                                                far,
-                                                mass1,
-                                                mass2,
-                                                pipeline,
-                                                instruments)
+                p_astro.compute_p_astro.s(snr,
+                                          far,
+                                          mass1,
+                                          mass2,
+                                          pipeline,
+                                          instruments)
                 |
                 gracedb.upload.s(
                     'p_astro.json', graceid,
@@ -178,7 +180,7 @@ def handle_cbc_event(alert):
                 )
                 |
                 gracedb.create_label.si('PASTRO_READY', graceid)
-            ).delay()
+            ).apply_async(priority=priority)
 
     if alert['alert_type'] != 'log':
         return
@@ -200,23 +202,7 @@ def handle_cbc_event(alert):
             )
             |
             gracedb.create_label.si('SKYMAP_READY', graceid)
-        ).delay()
-    elif filename == 'ranking_data.xml.gz':
-        (
-            ordered_group(
-                gracedb.download.si('coinc.xml', graceid),
-                gracedb.download.si('ranking_data.xml.gz', graceid)
-            )
-            |
-            p_astro_gstlal.compute_p_astro.s()
-            |
-            gracedb.upload.s(
-                'p_astro.json', graceid,
-                'p_astro computation complete', ['p_astro', 'public']
-            )
-            |
-            gracedb.create_label.si('PASTRO_READY', graceid)
-        ).delay()
+        ).apply_async(priority=priority)
 
 
 @lvalert.handler('superevent',
@@ -240,13 +226,17 @@ def handle_posterior_samples(alert):
         skymaps.skymap_from_samples.s()
         |
         group(
-            skymaps.annotate_fits('{}.multiorder.fits'.format(prefix),
-                                  superevent_id, ['pe', 'sky_loc']),
+            skymaps.annotate_fits.s(
+                '{}.fits.gz'.format(prefix),
+                superevent_id, ['pe', 'sky_loc']
+            ),
+
             gracedb.upload.s(
                 '{}.multiorder.fits'.format(prefix), superevent_id,
                 'Multiresolution fits file generated from {}'.format(filename),
                 ['pe', 'sky_loc']
             ),
+
             skymaps.flatten.s('{}.fits.gz'.format(prefix))
             |
             gracedb.upload.s(
@@ -305,8 +295,9 @@ def _create_voevent(classification, *args, **kwargs):
     classification : tuple, None
         A collection of JSON strings, generated by
         :meth:`gwcelery.tasks.em_bright.classifier` and
-        :meth:`gwcelery.tasks.p_astro_gstlal.compute_p_astro` respectively; or
-        None
+        :meth:`gwcelery.tasks.p_astro.compute_p_astro` or
+        content of ``p_astro.json`` uploaded by gstlal respectively;
+        or None
     \*args
         Additional positional arguments passed to
         :meth:`gwcelery.tasks.gracedb.create_voevent`.
@@ -415,7 +406,7 @@ def preliminary_alert(event, superevent_id):
                 |
                 gracedb.create_label.si('SKYMAP_READY', superevent_id),
 
-                skymaps.annotate_fits(
+                skymaps.annotate_fits.s(
                     skymap_filename,
                     superevent_id,
                     ['sky_loc', 'public']
@@ -532,6 +523,65 @@ def parameter_estimation(far_event, superevent_id):
         canvas.apply_async()
 
 
+@app.task(shared=False)
+def _apply_public_tag(log_messages, skymap_filename, em_bright_filename,
+                      p_astro_filename, superevent_id):
+    """Apply `public` tag to filenames if not already applied.
+    Find latest filenames and return them if not filename not supplied.
+    """
+    skymap_needed = (skymap_filename is None)
+    em_bright_needed = (em_bright_filename is None)
+    p_astro_needed = (p_astro_filename is None)
+    public_tags_needed = []
+
+    for message in log_messages:
+        t = message['tag_names']
+        f = message['filename']
+        if not f:
+            continue
+        if f in (skymap_filename, em_bright_filename, p_astro_filename) \
+                and 'public' not in t:
+            public_tags_needed.append(
+                gracedb.create_tag.si(
+                    f,
+                    'public',
+                    superevent_id
+                )
+            )
+        if skymap_needed \
+                and {'sky_loc', 'public'}.issubset(t) \
+                and f.endswith('.fits.gz'):
+            skymap_filename = f
+        if em_bright_needed \
+                and 'em_bright' in t \
+                and f.endswith('.json'):
+            em_bright_filename = f
+        if p_astro_needed \
+                and 'p_astro' in t \
+                and f.endswith('.json'):
+            p_astro_filename = f
+    # FIXME: chain -> group when
+    # https://github.com/celery/celery/issues/5512
+    # is resolved
+    chain(*public_tags_needed)()
+    return skymap_filename, em_bright_filename, p_astro_filename
+
+
+@app.task(shared=False)
+def _unpack_download_create_voevent(files, superevent_id, alert_type):
+    skymap_filename, em_bright_filename, p_astro_filename = files
+    return _create_voevent(
+        (gracedb.download(em_bright_filename, superevent_id),
+         gracedb.download(p_astro_filename, superevent_id)),
+        superevent_id,
+        alert_type,
+        skymap_filename=skymap_filename,
+        internal=False,
+        open_alert=True,
+        vetted=True
+    )
+
+
 @app.task(ignore_result=True, shared=False)
 def initial_or_update_alert(superevent_id, alert_type, skymap_filename=None,
                             em_bright_filename=None,
@@ -555,41 +605,19 @@ def initial_or_update_alert(superevent_id, alert_type, skymap_filename=None,
         The p_astro file to use.
         If None, then most recent one is used.
     """
-    skymap_needed = (skymap_filename is None)
-    em_bright_needed = (em_bright_filename is None)
-    p_astro_needed = (p_astro_filename is None)
-    if skymap_needed or em_bright_needed or p_astro_needed:
-        for message in gracedb.get_log(superevent_id):
-            t = message['tag_names']
-            f = message['filename']
-            if not f:
-                continue
-            if skymap_needed \
-                    and {'sky_loc', 'public'}.issubset(t) \
-                    and (f.endswith('.fits') or f.endswith('.fits.gz')):
-                skymap_filename = f
-            if em_bright_needed \
-                    and 'em_bright' in t \
-                    and f.endswith('.json'):
-                em_bright_filename = f
-            if p_astro_needed \
-                    and 'p_astro' in t \
-                    and f.endswith('.json'):
-                p_astro_filename = f
-
     (
-        group(
-            gracedb.download.si(em_bright_filename, superevent_id),
-            gracedb.download.si(p_astro_filename, superevent_id)
+        gracedb.get_log.si(superevent_id)
+        |
+        _apply_public_tag.s(
+            skymap_filename,
+            em_bright_filename,
+            p_astro_filename,
+            superevent_id
         )
         |
-        _create_voevent.s(
+        _unpack_download_create_voevent.s(
             superevent_id,
-            alert_type,
-            skymap_filename=skymap_filename,
-            internal=False,
-            open_alert=True,
-            vetted=True
+            alert_type
         )
         |
         group(

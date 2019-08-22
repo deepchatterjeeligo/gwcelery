@@ -15,6 +15,10 @@ export PATH="$(python -m site --user-base)/bin${PATH+:${PATH}}"
 # `pip install` should always behave as if it was called with `--user`.
 export PIP_USER=1
 
+# Disable OpenMP threading by default.
+# In this environmnet, it will be enabled selectively by processes that use it.
+export OMP_NUM_THREADS=1
+
 # Unless the user has set `GSSAPIDelegateCredentials no` in their ~/.ssh/config
 # file, their Globus certificate will be copied in when they log in, shadowing
 # the robot certificate. Set these environment variables to override.
@@ -31,16 +35,8 @@ export CELERY_BROKER_URL="redis+socket://${HOME}/redis.sock"
 case "${USER}" in
 emfollow)
     export CELERY_CONFIG_MODULE="gwcelery.conf.production"
-    export FLOWER_PORT="5555"
-    export FLASK_PORT="5556"
-    export FLOWER_URL_PREFIX="/flower"
-    export FLASK_URL_PREFIX="/gwcelery"
     ;;
 emfollow-playground)
     export CELERY_CONFIG_MODULE="gwcelery.conf.playground"
-    export FLOWER_PORT="5557"
-    export FLASK_PORT="5558"
-    export FLOWER_URL_PREFIX="/playground/flower"
-    export FLASK_URL_PREFIX="/playground/gwcelery"
     ;;
 esac
