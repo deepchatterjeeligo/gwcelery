@@ -369,10 +369,7 @@ def preliminary_alert(event, superevent_id):
 
     if event['group'] == 'CBC':
         canvas |= (
-            ordered_group(
-                gracedb.download.si('coinc.xml', preferred_event_id),
-                _download.si('psd.xml.gz', preferred_event_id)
-            )
+            gracedb.download.si('coinc.xml', preferred_event_id)
             |
             bayestar.localize.s(preferred_event_id)
             |

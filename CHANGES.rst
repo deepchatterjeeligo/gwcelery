@@ -26,6 +26,9 @@ Changelog
 
 -   Incorporate update cirular into flask app.
 
+-   Have BAYESTAR look for PSDs in an event's ``coinc.xml`` file rather than in
+    the ``psd.xml.gz`` file. This allows sky localization to start earlier.
+
 0.8.7 (2019-09-14)
 ------------------
 

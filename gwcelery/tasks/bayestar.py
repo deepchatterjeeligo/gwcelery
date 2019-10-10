@@ -16,16 +16,15 @@ log = logging.getLogger('BAYESTAR')
 
 
 @app.task(queue='openmp', shared=False)
-def localize(coinc_psd, graceid, filename='bayestar.fits.gz',
+def localize(coinc, graceid, filename='bayestar.fits.gz',
              disabled_detectors=None):
     """Generate a rapid sky localization using
     :mod:`BAYESTAR <ligo.skymap.bayestar>`.
 
     Parameters
     ----------
-    coinc_psd : tuple
-        Tuple consisting of the byte contents of the input event's
-        ``coinc.xml`` and ``psd.xml.gz`` files.
+    coinc : bytes
+        The byte contents of the input event's ``coinc.xml`` file.
     graceid : str
         The GraceDB ID, used for FITS metadata and recording log messages
         to GraceDB.
@@ -62,10 +61,8 @@ def localize(coinc_psd, graceid, filename='bayestar.fits.gz',
         log.info('by your command...')
 
         # Parse event
-        coinc, psd = coinc_psd
         coinc = io.BytesIO(coinc)
-        psd = io.BytesIO(psd)
-        event_source = events.ligolw.open(coinc, psd_file=psd, coinc_def=None)
+        event_source = events.ligolw.open(coinc, coinc_def=None)
         if disabled_detectors:
             event_source = events.detector_disabled.open(
                 event_source, disabled_detectors)
