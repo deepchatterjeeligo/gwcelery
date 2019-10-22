@@ -59,9 +59,8 @@ def handle(payload):
     if alert_type == 'label_added':
         label = payload['data']['name']
         group = payload['object']['group'].lower()
-        if label == 'EM_COINC':
-            # FIXME: Add RAVEN preliminary alert
-            log.info('Label %s added to %s', label, gid)
+        if label == 'EM_SENT':
+            pass
         elif label not in REQUIRED_LABELS_BY_GROUP[group]:
             return
     elif alert_type != 'new':
@@ -407,7 +406,9 @@ def _should_publish(event):
     trials_factor = app.conf['preliminary_alert_trials_factor'][group]
     far_threshold = app.conf['preliminary_alert_far_threshold'][group]
     far = trials_factor * event['far']
-    return not event['offline'], far <= far_threshold
+    raven_coincidence = ('EM_SENT' in event['labels'])
+
+    return not event['offline'], (far <= far_threshold or raven_coincidence)
 
 
 def keyfunc(event):
