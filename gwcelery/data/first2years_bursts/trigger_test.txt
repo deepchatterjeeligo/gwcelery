@@ -1,0 +1,89 @@
+nevent:     1
+ndim:       2
+run:        1
+name:
+rho:        5.387770
+netCC:      0.957855
+netED:      -0.024199
+penalty:    0.822578
+gnet:       0.833366
+anet:       0.132869
+inet:       0.000000
+likelihood: 5.662294e+01
+ecor:       5.805995e+01
+ECOR:       5.805614e+01
+factor:     0.000000
+range:      0.000000
+mchirp:     0.000000
+norm:       5.725134
+usize:      0
+ifo:        L1 H1
+eventID:    1 0
+rho:        5.387770 5.132818
+type:       1 0
+rate:       0 0
+volume:     16 14
+size:       15 14
+lag:        0.000000 0.000000
+slag:       0.000000 0.000000
+phi:        266.132812 0.000000 281.775696 48.867188
+theta:      57.202831 0.000000 32.797169 108.839401
+psi:        0.000000 0.000000
+iota:       0.000000 0.000000
+bp:          0.7792 -0.7123
+inj_bp:      0.0000  0.0000
+bx:         -0.6238  0.5760
+inj_bx:      0.0000  0.0000
+chirp:      0.000000 -13.831618 9.017875 0.952680 1.000000 1.000000
+range:      0.000000 0.000000
+Deff:       0.000000 0.000000
+mass:       0.000000 0.000000
+spin:       0.000000 0.000000 0.000000 0.000000 0.000000 0.000000
+eBBH:       0.000000 0.000000 0.000000 0.000000
+null:       6.658293e-01 8.886905e-01
+strain:     4.029639e-23 0.000000e+00
+hrss:       2.665412e-23 3.022179e-23
+inj_hrss:   0.000000e+00 0.000000e+00
+noise:      4.730675e-24 5.889402e-24
+segment:    1253924527.0000 1253924723.0000 1253924527.0000 1253924723.0000
+start:      1253924697.0625 1253924697.0625
+time:       1267388882 1267388882
+stop:       1253924697.1875 1253924697.1875
+inj_time:         0.0000       0.0000
+left:       170.062500 170.062500
+right:      25.812500 25.812500
+duration:   0.017787 0.125000
+frequency:  62.010937 62.419186
+low:        32.000000
+high:       112.000000
+bandwidth:  6.655378 80.000000
+snr:        3.350204e+01 2.725143e+01
+xSNR:       3.221235e+01 2.643893e+01
+sSNR:       3.097230e+01 2.565064e+01
+iSNR:       0.000000 0.000000
+oSNR:       0.000000 0.000000
+ioSNR:      0.000000 0.000000
+netcc:      0.957855 0.957855 0.965642 0.919307
+neted:      -1.404971 6.513866 60.753471 152.063766 180.994751
+erA:         0.000 14.615 21.230 26.772 31.940 37.055 42.452 48.520 55.995 66.973  0.000
+sky_res:    0.458065
+Qveto:      0.865744 4.812633 0.000000 0.000000
+Lveto:      64.000000 8.000000 1.000000
+
+code version: wat6.2.6
+hoft version: C00,L1:GDS-CALIB_STRAIN_CLEAN,H1:GDS-CALIB_STRAIN_CLEAN
+lldq_flags: L1:GDS-CALIB_STATE_VECTOR:3,L1:DMT-DQ_VECTOR:22,H1:GDS-CALIB_STATE_VECTOR:3,H1:DMT-DQ_VECTOR:22
+
+## number of events with rho>= rho of the event | corresponding rate | start time of the analyzed segment list | end time of the analyzed segment list | duration of the analyzed segment list
+Applied trials factor: 1
+#significance based on the last day
+3629 4.10405e-06 1253766586 1253921871 86400
+#significance based on the last week
+27251 4.32264e-06 1252945158 1253920055 604800
+
+CIT: /home/waveburst/online/O3_LH_IMBHB_ONLINE/RUN_cWB/JOBS/125392/1253924655-1253924715/OUTPUT.merged/TRIGGERS/trigger_1253924697.0864.txt
+CAT1 1253924527 1253924723
+
+CAT2 L1 1253924527 1253924723
+
+CAT2 H1 1253924527 1253924723
