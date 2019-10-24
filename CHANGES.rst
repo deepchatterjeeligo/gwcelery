@@ -1,10 +1,123 @@
 Changelog
 =========
 
-0.8.5 (unreleased)
+0.8.8 (unreleased)
 ------------------
 
--   Make raven.py tests more robust and have increased coverage.
+-   Update ligo-followup-advocate version to 1.1.3.
+
+-   Copy a comment attached to posterior samples into the comment attached to
+    the corresponding skymap.
+
+-   Add bilby online parameter inference workflow.
+
+-   Fix approximant name used for automatic parameter estimation.
+
+-   Start parameter estimation on mock events.
+
+-   Add acceptance tests of parameter estimation.
+
+-   Apply EM_COINC to preferred events as well.
+
+-   Use the Redis server that is provided by the operating system (e.g. as a
+    systemd unit) rather than starting our own Redis server. This prevents a
+    race condition between the shutdown of Redis and the shutdown of the
+    workers that caused the workers to hang on shutdown.
+
+-   Incorporate update circular into flask app.
+
+-   Update HTCondor accounting group from O2 to O3.
+
+-   Increase throughput for sky localization tasks by offloading processing of
+    the ``openmp`` Celery queue to 40 workers that are launched via HTCondor on
+    specially configured cluster nodes.
+
+-   Use mpich as the MPI runtime for parameter estimation.
+
+-   Add event completeness to publishability criterion. All three of
+    ``PASTRO_READY``, ``SKYMAP_READY``, and ``EMBRIGHT_READY`` will be used to
+    evaluate event completeness for CBC events. Only the ``SKYMAP_READY`` label
+    will be used to evaluate completeness for burst events.
+
+-   Revert back to running BAYESTAR for all ``G`` events.
+
+0.8.7 (2019-09-14)
+------------------
+
+-   Update ligo-raven version to 1.17.
+
+0.8.5.1 (2019-09-04)
+--------------------
+
+This is a non-sequential bugfix release based on version 0.8.5.1 to fix the
+following issue:
+
+-   Fix a lethal bug in ``em_bright.py`` introduced in version 0.8.5. The bug
+    would incorrectly use the snr as the maximum mass of the NS and therefore
+    the source property estimation for pipelines apart from gstlal would be
+    grossly incorrect.
+
+0.8.6 (2019-09-01)
+------------------
+
+-   Update ligo-raven version to 1.16.
+
+-   Fix a bug that prevented retrying of failed GraceDB API calls in the
+    superevent manager.
+
+-   Add a retry for one more potential GraceDB API failure in the initial and
+    update alert workflows.
+
+-   In the playground environment only, upload each mock event several times in
+    rapid succession with random jitter in order to simulate multiple pipeline
+    uploads.
+
+-   Expose events to the public prior to sending any kind of alert:
+    preliminary, initial, update, or retraction. Previously this behavior only
+    occurred for preliminary alerts, which created the unusual and undesirable
+    possibility of a public GCN for an event that is not public. As before,
+    events are only exposed to the public in the production environment, and
+    not in the playground environment.
+
+-   Propagate sky map file extensions (as in ``bayestar.fits.gz,1``) to the
+    URLs that are presented in GCN notices.
+
+-   Generate flattened FITS files and sky map visualizations for all
+    superevents, even those that do not rise to the public alert threshold.
+    Note that as a side effect all superevents will have the ``EM_Selected``
+    label applied, since it is used as a semaphore to trigger the annotations.
+    The ``ADVREQ`` label used to serve double duty as the semaphore and also as
+    the wake-up call for follow-up advocates, but now it only serves the latter
+    purpose.
+
+    The feature of generating flattened FITS files and sky map plots for all
+    superevents comes as a request from the Fermi and Swift sub-threshold
+    searches.
+
+-   Delay running BAYESTAR until the superevent's preferred event has
+    stabilized. BAYESTAR is the most computationally intensive postprocessing
+    task and running it for all events belonging to a superevent was a
+    bottleneck.
+
+-   For the playground environment only, decrease the timeout for stabilization
+    of the preferred event from 5 minutes to 2 minutes, which is comparable to
+    how long it has taken recent events to settle. This does not affect the
+    configuration of the production environment.
+
+-   Changed ``handle_cbc_event`` handler to call gstlal trained ML based
+    inference for source property computation for gstlal triggers.
+
+-   Apply EM_COINC to superevent and external event in parallel.
+
+0.8.5 (2019-08-23)
+------------------
+
+-   Made raven.py tests more robust and have increased coverage.
+
+-   Removed the feature of p-astro and em_bright reading mean counts,
+    livetimes or ML classifiers from emfollow/data; moved them to
+    lscsoft/p_astro as package data. Added back the ``test_tasks_p_astro.py``
+    that was accidentally taken out in ``v0.8.0``. Pinned ``p_astro == 0.8.0``.
 
 0.8.4 (2019-08-16)
 ------------------

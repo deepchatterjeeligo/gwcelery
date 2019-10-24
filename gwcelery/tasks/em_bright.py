@@ -1,7 +1,5 @@
 """Qualitative source classification for CBC events."""
 import json
-import pickle
-from urllib import error, request
 
 from ligo import computeDiskMass, em_bright
 
@@ -87,21 +85,7 @@ def classifier_gstlal(args, graceid):
     -----
     This task would only work from within the CIT cluster.
     """
-    mass1, mass2, chi1, chi2, snr = args
-    try:
-        response = request.urlopen(app.conf['em_bright_url'])
-        ns_classifier, emb_classifier, scaler, filename = \
-            pickle.loads(response.read())
-        kwargs = {'ns_classifier': ns_classifier,
-                  'emb_classifier': emb_classifier,
-                  'scaler': scaler}
-    except (pickle.UnpicklingError, error.HTTPError):
-        kwargs = {}
-        log.exception("Error in unpickling classifier or 404. Using defaults.")
-
-    p_ns, p_em = em_bright.source_classification(mass1, mass2,
-                                                 chi1, chi2,
-                                                 snr, **kwargs)
+    p_ns, p_em = em_bright.source_classification(*args)
 
     data = json.dumps({
         'HasNS': p_ns,

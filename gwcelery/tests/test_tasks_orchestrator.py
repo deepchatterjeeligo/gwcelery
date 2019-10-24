@@ -1,13 +1,13 @@
 import os
 import json
-from unittest.mock import Mock, patch
+from unittest.mock import call, Mock, patch
 
 from ligo.gracedb import rest
 import pkg_resources
 import pytest
 
 from .. import app
-from ..tasks import lalinference
+from ..tasks import inference
 from ..tasks import orchestrator
 from ..tasks import superevents
 from .test_tasks_skymaps import toy_3d_fits_filecontents  # noqa: F401
@@ -22,6 +22,7 @@ from . import resource_json
      ['label_added', 'Burst', 'CWB', False, 1.e-9, ['H1', 'L1', 'V1']],
      ['label_added', 'Burst', 'oLIB', False, 1.e-9, ['H1', 'L1', 'V1']],
      ['new', 'CBC', 'gstlal', False, 1.e-9, ['H1', 'L1']]])
+@pytest.mark.xfail(reason='https://github.com/celery/celery/issues/4405')
 def test_handle_superevent(monkeypatch, toy_3d_fits_filecontents,  # noqa: F811
                            alert_type, group, pipeline, offline,
                            far, instruments):
@@ -81,7 +82,7 @@ def test_handle_superevent(monkeypatch, toy_3d_fits_filecontents,  # noqa: F811
         elif filename == 'p_astro.json':
             return json.dumps(
                 dict(BNS=0.94, NSBH=0.03, BBH=0.02, Terrestrial=0.01))
-        elif filename == lalinference.ini_name:
+        elif filename == inference.ini_name:
             return 'test'
         else:
             raise ValueError
@@ -113,11 +114,11 @@ def test_handle_superevent(monkeypatch, toy_3d_fits_filecontents,  # noqa: F811
                         get_superevent)
     monkeypatch.setattr('gwcelery.tasks.circulars.create_initial_circular.run',
                         create_initial_circular)
-    monkeypatch.setattr('gwcelery.tasks.lalinference.query_data.run',
+    monkeypatch.setattr('gwcelery.tasks.inference.query_data.run',
                         query_data)
-    monkeypatch.setattr('gwcelery.tasks.lalinference.prepare_ini.run',
+    monkeypatch.setattr('gwcelery.tasks.inference.prepare_ini.run',
                         prepare_ini)
-    monkeypatch.setattr('gwcelery.tasks.lalinference.start_pe.run',
+    monkeypatch.setattr('gwcelery.tasks.inference.start_pe.run',
                         start_pe)
     monkeypatch.setattr('gwcelery.tasks.gracedb.create_label._orig_run',
                         create_label)
@@ -179,23 +180,27 @@ def test_handle_superevent_event_added(mock_check_vectors, mock_get_event,
 def superevent_initial_alert_download(filename, graceid):
     if filename == 'S1234-Initial-1.xml':
         return 'contents of S1234-Initial-1.xml'
-    elif filename == 'em_bright.json':
+    elif filename == 'em_bright.json,0':
         return json.dumps({'HasNS': 0.0, 'HasRemnant': 0.0})
-    elif filename == 'p_astro.json':
+    elif filename == 'p_astro.json,0':
         return json.dumps(
             dict(BNS=0.94, NSBH=0.03, BBH=0.02, Terrestrial=0.01))
     else:
         raise ValueError
 
 
-@patch('gwcelery.tasks.gracedb.get_log.run',
+@patch('gwcelery.tasks.gracedb.expose._orig_run', return_value=None)
+@patch('gwcelery.tasks.gracedb.get_log',
        return_value=[{'tag_names': ['sky_loc', 'public'],
-                      'filename': 'foobar.fits.gz'},
+                      'filename': 'foobar.fits.gz',
+                      'file_version': 0},
                      {'tag_names': ['em_bright'],
-                      'filename': 'em_bright.json'},
+                      'filename': 'em_bright.json',
+                      'file_version': 0},
                      {'tag_names': ['p_astro'],
-                      'filename': 'p_astro.json'}])
-@patch('gwcelery.tasks.gracedb.create_tag._orig_run')
+                      'filename': 'p_astro.json',
+                      'file_version': 0}])
+@patch('gwcelery.tasks.gracedb.create_tag._orig_run', return_value=None)
 @patch('gwcelery.tasks.gracedb.create_voevent._orig_run',
        return_value='S1234-Initial-1.xml')
 @patch('gwcelery.tasks.gracedb.download._orig_run',
@@ -205,7 +210,8 @@ def superevent_initial_alert_download(filename, graceid):
 def test_handle_superevent_initial_alert(mock_create_initial_circular,
                                          mock_send,
                                          mock_create_voevent,
-                                         mock_create_tag, mock_get_log):
+                                         mock_create_tag, mock_get_log,
+                                         mock_expose):
     """Test that the ``ADVOK`` label triggers an initial alert."""
     alert = {
         'alert_type': 'label_added',
@@ -219,11 +225,16 @@ def test_handle_superevent_initial_alert(mock_create_initial_circular,
     mock_create_voevent.assert_called_once_with(
         'S1234', 'initial', BBH=0.02, BNS=0.94, NSBH=0.03, ProbHasNS=0.0,
         ProbHasRemnant=0.0, Terrestrial=0.01, internal=False, open_alert=True,
-        skymap_filename='foobar.fits.gz', skymap_type='foobar', vetted=True)
+        skymap_filename='foobar.fits.gz,0', skymap_type='foobar', vetted=True)
     mock_send.assert_called_once_with('contents of S1234-Initial-1.xml')
     mock_create_initial_circular.assert_called_once_with('S1234')
-    mock_create_tag.assert_called_once_with(
-        'S1234-Initial-1.xml', 'public', 'S1234')
+    mock_create_tag.assert_has_calls(
+        [call('foobar.fits.gz,0', 'public', 'S1234'),
+         call('em_bright.json,0', 'public', 'S1234'),
+         call('p_astro.json,0', 'public', 'S1234'),
+         call('S1234-Initial-1.xml', 'public', 'S1234')],
+        any_order=True)
+    mock_expose.assert_called_once_with('S1234')
 
 
 def superevent_retraction_alert_download(filename, graceid):
@@ -233,6 +244,7 @@ def superevent_retraction_alert_download(filename, graceid):
         raise ValueError
 
 
+@patch('gwcelery.tasks.gracedb.expose._orig_run', return_value=None)
 @patch('gwcelery.tasks.gracedb.create_tag._orig_run')
 @patch('gwcelery.tasks.gracedb.create_voevent._orig_run',
        return_value='S1234-Retraction-2.xml')
@@ -243,7 +255,7 @@ def superevent_retraction_alert_download(filename, graceid):
 def test_handle_superevent_retraction_alert(mock_create_retraction_circular,
                                             mock_send,
                                             mock_create_voevent,
-                                            mock_create_tag):
+                                            mock_create_tag, mock_expose):
     """Test that the ``ADVNO`` label triggers a retraction alert."""
     alert = {
         'alert_type': 'label_added',
@@ -260,6 +272,7 @@ def test_handle_superevent_retraction_alert(mock_create_retraction_circular,
     mock_create_retraction_circular.assert_called_once_with('S1234')
     mock_create_tag.assert_called_once_with(
         'S1234-Retraction-2.xml', 'public', 'S1234')
+    mock_expose.assert_called_once_with('S1234')
 
 
 def mock_download(filename, graceid, *args, **kwargs):
@@ -297,7 +310,7 @@ def test_handle_posterior_samples(monkeypatch, alert_type, filename):
     alert = {
         'alert_type': alert_type,
         'uid': 'S1234',
-        'data': {'filename': filename}
+        'data': {'comment': 'samples', 'filename': filename}
     }
 
     download = Mock()
@@ -336,9 +349,7 @@ def test_handle_posterior_samples(monkeypatch, alert_type, filename):
         flatten.assert_called_once()
 
 
-# FIXME calling em-bright point estimates for all pipelines until review
-# is complete
-@patch('gwcelery.tasks.em_bright.classifier_other.run')
+@patch('gwcelery.tasks.em_bright.classifier_gstlal.run')
 def test_handle_cbc_event_new_event(mock_classifier):
     payload = {
         "uid": "G000003",
@@ -348,6 +359,7 @@ def test_handle_cbc_event_new_event(mock_classifier):
             "graceid": "G000003",
             "gpstime": 100.0,
             "pipeline": "gstlal",
+            "labels": [],
             "group": "CBC",
             "search": "AllSky",
             "far": 1.e-31,
@@ -374,7 +386,7 @@ def test_handle_cbc_event_new_event(mock_classifier):
 @patch(
     'gwcelery.tasks.gracedb.get_event._orig_run',
     return_value={'graceid': 'T250822', 'group': 'CBC', 'pipeline': 'gstlal',
-                  'far': 1e-7,
+                  'far': 1e-7, 'labels': [],
                   'extra_attributes':
                       {'CoincInspiral': {'snr': 10.},
                        'SingleInspiral': [{'mass1': 10., 'mass2': 5.}]}})

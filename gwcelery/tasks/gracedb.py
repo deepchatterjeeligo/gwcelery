@@ -2,6 +2,7 @@
 from http.client import HTTPException
 import functools
 from socket import gaierror
+import re
 
 from ligo.gracedb import rest
 from celery.utils.log import get_task_logger
@@ -10,7 +11,8 @@ from ..import app
 from ..util import PromiseProxy
 
 client = PromiseProxy(rest.GraceDb,
-                      ('https://' + app.conf.gracedb_host + '/api/',))
+                      ('https://' + app.conf.gracedb_host + '/api/',),
+                      {'reload_certificate': True})
 
 log = get_task_logger(__name__)
 
@@ -47,6 +49,19 @@ def task(*args, **kwargs):
                     retry_kwargs=dict(max_retries=10))
 
 
+versioned_filename_regex = re.compile(
+    r'^(?P<filename>.*?)(?:,(?P<file_version>\d+))?$')
+
+
+def _parse_versioned_filename(versioned_filename):
+    match = versioned_filename_regex.fullmatch(versioned_filename)
+    filename = match['filename']
+    file_version = match['file_version']
+    if file_version is not None:
+        file_version = int(file_version)
+    return filename, file_version
+
+
 @task(shared=False)
 @catch_retryable_http_errors
 def create_event(filecontents, search, pipeline, group):
@@ -68,7 +83,7 @@ def create_label(label, graceid):
         # If we got a 400 error because no change was made, then ignore
         # the exception and return successfully to preserve idempotency.
         if e.message != \
-                b'"The fields superevent, label must make a unique set."':
+                '"The fields superevent, label must make a unique set."':
             raise
 
 
@@ -99,8 +114,13 @@ def create_signoff(status, comment, signoff_type, graceid):
 @catch_retryable_http_errors
 def create_tag(filename, tag, graceid):
     """Create a tag in GraceDB."""
+    filename, file_version = _parse_versioned_filename(filename)
     log = get_log(graceid)
-    *_, entry = (e for e in log if e['filename'] == filename)
+    if file_version is None:
+        *_, entry = (e for e in log if e['filename'] == filename)
+    else:
+        *_, entry = (e for e in log if e['filename'] == filename
+                     and e['file_version'] == file_version)
     log_number = entry['N']
     try:
         with client.addTag(graceid, log_number, tag):
@@ -108,7 +128,7 @@ def create_tag(filename, tag, graceid):
     except rest.HTTPError as e:
         # If we got a 400 error because no change was made, then ignore
         # the exception and return successfully to preserve idempotency.
-        if e.message != b'"Tag is already applied to this log message"':
+        if e.message != '"Tag is already applied to this log message"':
             raise
 
 
@@ -198,12 +218,13 @@ def replace_event(graceid, payload):
         pass  # Close without reading response; we only needed the status
 
 
-@task(ignore_result=True, shared=False)
+@task(shared=False)
 @catch_retryable_http_errors
 def upload(filecontents, filename, graceid, message, tags=()):
     """Upload a file to GraceDB."""
-    with client.writeLog(graceid, message, filename, filecontents, tags):
-        pass  # Close without reading response; we only needed the status
+    result = client.writeLog(
+        graceid, message, filename, filecontents, tags).json()
+    return '{},{}'.format(result['filename'], result['file_version'])
 
 
 @app.task(shared=False)
@@ -255,7 +276,7 @@ def update_superevent(superevent_id, t_start=None,
     except rest.HTTPError as e:
         # If we got a 400 error because no change was made, then ignore
         # the exception and return successfully to preserve idempotency.
-        error_msg = b'"Request would not modify the superevent"'
+        error_msg = '"Request would not modify the superevent"'
         if not (e.status == 400 and e.message == error_msg):
             raise
 
@@ -284,9 +305,8 @@ def create_superevent(graceid, t0, t_start, t_end, category):
                                      category=category):
             pass  # Close without reading response; we only needed the status
     except rest.HTTPError as e:
-        error_msg = \
-            b'"Event %s is already assigned to a Superevent"' % (graceid)
-        if not (e.status == 400 and e.message == error_msg):
+        error_msg = 'is already assigned to a Superevent'
+        if not (e.status == 400 and error_msg in e.message):
             raise
 
 
@@ -298,7 +318,6 @@ def add_event_to_superevent(superevent_id, graceid):
         with client.addEventToSuperevent(superevent_id, graceid):
             pass  # Close without reading response; we only needed the status
     except rest.HTTPError as e:
-        error_msg = \
-            b'"Event %s is already assigned to a Superevent"' % (graceid)
+        error_msg = '"is already assigned to a Superevent"'
         if not (e.status == 400 and e.message == error_msg):
             raise

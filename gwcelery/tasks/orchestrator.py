@@ -6,18 +6,18 @@ import re
 from socket import gaierror
 from urllib.error import URLError
 
-from celery import chain, group
+from celery import group
 from ligo.gracedb.rest import HTTPError
 
 from ..import app
 from . import bayestar
 from . import circulars
-from .core import identity, ordered_group
+from .core import identity, ordered_group, ordered_group_first
 from . import detchar
 from . import em_bright
 from . import gcn
 from . import gracedb
-from . import lalinference
+from . import inference
 from . import lvalert
 from . import p_astro
 from . import skymaps
@@ -34,9 +34,13 @@ from . import superevents
 def handle_selected_as_preferred(alert):
     # FIXME DQV & INJ labels not incorporated into labeling ADVREQ,
     # Remove after !495 is merged
-    if alert['alert_type'] == 'selected_as_preferred' \
-            and superevents.should_publish(alert['object']):
-        gracedb.create_label.delay('ADVREQ', alert['object']['superevent'])
+
+    if alert['alert_type'] == 'selected_as_preferred':
+        superevent_id = alert['object']['superevent']
+        gracedb.create_label.delay('EM_Selected', superevent_id)
+
+        if superevents.should_publish(alert['object']):
+            gracedb.create_label.delay('ADVREQ', superevent_id)
 
 
 @lvalert.handler('superevent',
@@ -70,8 +74,8 @@ def handle_superevent(alert):
 
     elif alert['alert_type'] == 'label_added':
         label_name = alert['data']['name']
-        # launch preliminary alert on ADVREQ
-        if label_name == 'ADVREQ':
+        # launch preliminary alert on EM_Selected
+        if label_name == 'EM_Selected':
             (
                 _get_preferred_event.si(superevent_id).set(
                     countdown=app.conf['orchestrator_timeout']
@@ -89,7 +93,7 @@ def handle_superevent(alert):
             ).apply_async()
         # launch initial/retraction alert on ADVOK/ADVNO
         elif label_name == 'ADVOK':
-            initial_alert(superevent_id)
+            initial_alert((None, None, None), superevent_id)
         elif label_name == 'ADVNO':
             retraction_alert(superevent_id)
 
@@ -125,12 +129,13 @@ def handle_cbc_event(alert):
     ``psd.xml.gz``. The table below lists which
     files are created as a result, and which tasks generate them.
 
-    ============================== =====================================================
+    ============================== ================================================
     File                           Task
-    ============================== =====================================================
+    ============================== ================================================
     ``bayestar.multiorder.fits``   :meth:`gwcelery.tasks.bayestar.localize`
     ``em_bright.json``             :meth:`gwcelery.tasks.em_bright.classifier`
-    ============================== =====================================================
+    ``p_astro.json.json``          :meth:`gwcelery.tasks.p_astro.compute_p_astro`
+    ============================== ================================================
     """  # noqa: E501
 
     graceid = alert['uid']
@@ -149,9 +154,8 @@ def handle_cbc_event(alert):
         chi1 = extra_attributes['SingleInspiral'][0]['spin1z']
         chi2 = extra_attributes['SingleInspiral'][0]['spin2z']
 
-        # FIXME Changing em-bright to work on point estimates only
-        # for all pipelines until review is complete
-        em_bright_task = em_bright.classifier_other
+        em_bright_task = em_bright.classifier_gstlal if pipeline == 'gstlal' \
+            else em_bright.classifier_other
 
         (
             em_bright_task.si((mass1, mass2, chi1, chi2, snr), graceid)
@@ -217,6 +221,7 @@ def handle_posterior_samples(alert):
         return
     superevent_id = alert['uid']
     filename = alert['data']['filename']
+    info = '{} {}'.format(alert['data']['comment'], filename)
     prefix, _ = filename.rsplit('.posterior_samples.')
     # FIXME: It is assumed that posterior samples always come from
     # lalinference. After bilby or rift is integrated, this has to be fixed.
@@ -233,7 +238,7 @@ def handle_posterior_samples(alert):
 
             gracedb.upload.s(
                 '{}.multiorder.fits'.format(prefix), superevent_id,
-                'Multiresolution fits file generated from {}'.format(filename),
+                'Multiresolution fits file generated from "{}"'.format(info),
                 ['pe', 'sky_loc']
             ),
 
@@ -241,7 +246,7 @@ def handle_posterior_samples(alert):
             |
             gracedb.upload.s(
                 '{}.fits.gz'.format(prefix), superevent_id,
-                'Flat-resolution fits file created from {}'.format(filename),
+                'Flat-resolution fits file created from "{}"'.format(info),
                 ['pe', 'sky_loc']
             )
         )
@@ -315,7 +320,8 @@ def _create_voevent(classification, *args, **kwargs):
     if classification is not None:
         # Merge source classification and source properties into kwargs.
         for text in classification:
-            kwargs.update(json.loads(text))
+            if text is not None:
+                kwargs.update(json.loads(text))
 
     # FIXME: These keys have differ between em_bright.json
     # and the GraceDB REST API.
@@ -339,6 +345,12 @@ def _create_voevent(classification, *args, **kwargs):
     return gracedb.create_voevent._orig_run(*args, **kwargs)
 
 
+@gracedb.task(shared=False)
+def _create_label_and_return_filename(filename, label, graceid):
+    gracedb.create_label(label, graceid)
+    return filename
+
+
 @app.task(ignore_result=True, shared=False)
 def preliminary_alert(event, superevent_id):
     """Produce a preliminary alert by copying any sky maps.
@@ -354,6 +366,7 @@ def preliminary_alert(event, superevent_id):
     5.   Apply the GCN_PRELIM_SENT label to the superevent.
     6.   Create and upload a GCN Circular draft.
     """
+    priority = 0 if superevents.should_publish(event) else 1
     preferred_event_id = event['graceid']
 
     if event['group'] == 'CBC':
@@ -375,25 +388,11 @@ def preliminary_alert(event, superevent_id):
     is_publishable = (superevents.should_publish(event)
                       and {'DQV', 'INJ'}.isdisjoint(event['labels']))
 
-    canvas = chain()
-
-    if is_publishable:
-        canvas |= gracedb.expose.si(superevent_id)
-
-    # If there is a sky map, then copy it to the superevent and create plots.
-    if skymap_filename is not None:
-        canvas |= (
+    canvas = ordered_group(
+        (
             _download.si(original_skymap_filename, preferred_event_id)
             |
-            group(
-                gracedb.upload.s(
-                    original_skymap_filename,
-                    superevent_id,
-                    message='Localization copied from {}'.format(
-                        preferred_event_id),
-                    tags=['sky_loc', 'public']
-                ),
-
+            ordered_group_first(
                 skymaps.flatten.s(skymap_filename)
                 |
                 gracedb.upload.s(
@@ -404,7 +403,17 @@ def preliminary_alert(event, superevent_id):
                     tags=['sky_loc', 'public']
                 )
                 |
-                gracedb.create_label.si('SKYMAP_READY', superevent_id),
+                _create_label_and_return_filename.s(
+                    'SKYMAP_READY', superevent_id
+                ),
+
+                gracedb.upload.s(
+                    original_skymap_filename,
+                    superevent_id,
+                    message='Localization copied from {}'.format(
+                        preferred_event_id),
+                    tags=['sky_loc', 'public']
+                ),
 
                 skymaps.annotate_fits.s(
                     skymap_filename,
@@ -412,11 +421,9 @@ def preliminary_alert(event, superevent_id):
                     ['sky_loc', 'public']
                 )
             )
-        )
+        ) if skymap_filename is not None else identity.s(None),
 
-    # If this is a CBC event, then copy the EM bright classification.
-    if event['group'] == 'CBC':
-        canvas |= group(
+        (
             _download.si('em_bright.json', preferred_event_id)
             |
             gracedb.upload.s(
@@ -427,10 +434,12 @@ def preliminary_alert(event, superevent_id):
                 tags=['em_bright', 'public']
             )
             |
-            gracedb.create_label.si('EMBRIGHT_READY', superevent_id)
-            |
-            _download.si('em_bright.json', superevent_id),
+            _create_label_and_return_filename.s(
+                'EMBRIGHT_READY', superevent_id
+            )
+        ) if event['group'] == 'CBC' else identity.s(None),
 
+        (
             _download.si('p_astro.json', preferred_event_id)
             |
             gracedb.upload.s(
@@ -441,45 +450,18 @@ def preliminary_alert(event, superevent_id):
                 tags=['p_astro', 'public']
             )
             |
-            gracedb.create_label.si('PASTRO_READY', superevent_id)
-            |
-            _download.si('p_astro.json', superevent_id)
-        ) | identity.s()  # FIXME: necessary to pass result to next task?
-    else:
-        canvas |= identity.si(None)
+            _create_label_and_return_filename.s(
+                'PASTRO_READY', superevent_id
+            )
+        ) if event['group'] == 'CBC' else identity.s(None)
+    )
 
     # Send GCN notice and upload GCN circular draft for online events.
     if is_publishable:
-        # compose preliminary GCN and send
-        canvas |= (
-            _create_voevent.s(
-                superevent_id, 'preliminary',
-                skymap_filename=skymap_filename,
-                internal=False,
-                open_alert=True
-            )
-            |
-            group(
-                gracedb.download.s(superevent_id)
-                |
-                gcn.send.s()
-                |
-                gracedb.create_label.si('GCN_PRELIM_SENT', superevent_id),
+        canvas |= preliminary_initial_update_alert.s(
+            superevent_id, 'preliminary')
 
-                gracedb.create_tag.s('public', superevent_id),
-
-                circulars.create_initial_circular.si(superevent_id)
-                |
-                gracedb.upload.s(
-                    'preliminary-circular.txt',
-                    superevent_id,
-                    'Template for preliminary GCN Circular',
-                    tags=['em_follow']
-                )
-            )
-        )
-
-    canvas.apply_async()
+    canvas.apply_async(priority=priority)
 
 
 @gracedb.task(shared=False)
@@ -494,22 +476,33 @@ def _get_lowest_far(superevent_id):
 
 @app.task(ignore_result=True, shared=False)
 def parameter_estimation(far_event, superevent_id):
-    """Tasks for Parameter Estimation Followup with LALInference
+    """Tasks for Parameter Estimation Followup with LALInference or Bilby
 
-    This consists of the following steps:
+    For LALInference, this consists of the following steps:
 
     1.   Prepare and upload an ini file which is suitable for the target event.
     2.   Start Parameter Estimation if FAR is smaller than the PE threshold.
+
+    For Bilby, this consists of the following steps:
+
+    1.   Start Parameter Estimation if FAR is smaller than the PE threshold.
+    2.   Upload of ini file during Parameter Estimation
     """
     far, event = far_event
     preferred_event_id = event['graceid']
     # FIXME: it will be better to start parameter estimation for 'burst'
     # events.
-    if event['group'] == 'CBC' and event['search'] != 'MDC':
-        canvas = lalinference.pre_pe_tasks(event, superevent_id)
+    if event['group'] == 'CBC':
+        canvas = inference.pre_pe_tasks(event, superevent_id)
         if far <= app.conf['pe_threshold']:
-            canvas |= lalinference.start_pe.s(preferred_event_id,
-                                              superevent_id)
+            canvas |= group(
+                inference.start_pe.s(
+                    preferred_event_id, superevent_id, 'lalinference'
+                ),
+                inference.start_pe.s(
+                    preferred_event_id, superevent_id, 'bilby'
+                )
+            )
         else:
             canvas |= gracedb.upload.si(
                           filecontents=None, filename=None,
@@ -523,107 +516,90 @@ def parameter_estimation(far_event, superevent_id):
         canvas.apply_async()
 
 
-@app.task(shared=False)
-def _apply_public_tag(log_messages, skymap_filename, em_bright_filename,
-                      p_astro_filename, superevent_id):
-    """Apply `public` tag to filenames if not already applied.
-    Find latest filenames and return them if not filename not supplied.
+@gracedb.task(ignore_result=True, shared=False)
+def preliminary_initial_update_alert(filenames, superevent_id, alert_type):
     """
-    skymap_needed = (skymap_filename is None)
-    em_bright_needed = (em_bright_filename is None)
-    p_astro_needed = (p_astro_filename is None)
-    public_tags_needed = []
-
-    for message in log_messages:
-        t = message['tag_names']
-        f = message['filename']
-        if not f:
-            continue
-        if f in (skymap_filename, em_bright_filename, p_astro_filename) \
-                and 'public' not in t:
-            public_tags_needed.append(
-                gracedb.create_tag.si(
-                    f,
-                    'public',
-                    superevent_id
-                )
-            )
-        if skymap_needed \
-                and {'sky_loc', 'public'}.issubset(t) \
-                and f.endswith('.fits.gz'):
-            skymap_filename = f
-        if em_bright_needed \
-                and 'em_bright' in t \
-                and f.endswith('.json'):
-            em_bright_filename = f
-        if p_astro_needed \
-                and 'p_astro' in t \
-                and f.endswith('.json'):
-            p_astro_filename = f
-    # FIXME: chain -> group when
-    # https://github.com/celery/celery/issues/5512
-    # is resolved
-    chain(*public_tags_needed)()
-    return skymap_filename, em_bright_filename, p_astro_filename
-
-
-@app.task(shared=False)
-def _unpack_download_create_voevent(files, superevent_id, alert_type):
-    skymap_filename, em_bright_filename, p_astro_filename = files
-    return _create_voevent(
-        (gracedb.download(em_bright_filename, superevent_id),
-         gracedb.download(p_astro_filename, superevent_id)),
-        superevent_id,
-        alert_type,
-        skymap_filename=skymap_filename,
-        internal=False,
-        open_alert=True,
-        vetted=True
-    )
-
-
-@app.task(ignore_result=True, shared=False)
-def initial_or_update_alert(superevent_id, alert_type, skymap_filename=None,
-                            em_bright_filename=None,
-                            p_astro_filename=None):
-    """
-    Create and send initial or update GCN notice.
+    Create and send a preliminary, initial, or update GCN notice.
 
     Parameters
     ----------
+    filenames : tuple
+        A list of the sky map, em_bright, and p_astro filenames.
     superevent_id : str
         The superevent ID.
-    alert_type : {'initial', 'update'}
+    alert_type : {'preliminary', 'initial', 'update'}
         The alert type.
-    skymap_filename : str, optional
-        The sky map to send.
-        If None, then most recent public sky map is used.
-    em_bright_filename : str, optional
-        The source classification file to use.
-        If None, then most recent one is used.
-    p_astro_filename : str, optional
-        The p_astro file to use.
-        If None, then most recent one is used.
+
+    Notes
+    -----
+    This function is decorated with :obj:`gwcelery.tasks.gracedb.task` rather
+    than :obj:`gwcelery.app.task` so that a synchronous call to
+    :func:`gwcelery.tasks.gracedb.get_log` is retried in the event of GraceDB
+    API failures.
     """
+    skymap_filename, em_bright_filename, p_astro_filename = filenames
+    skymap_needed = (skymap_filename is None)
+    em_bright_needed = (em_bright_filename is None)
+    p_astro_needed = (p_astro_filename is None)
+    if skymap_needed or em_bright_needed or p_astro_needed:
+        for message in gracedb.get_log(superevent_id):
+            t = message['tag_names']
+            f = message['filename']
+            v = message['file_version']
+            fv = '{},{}'.format(f, v)
+            if not f:
+                continue
+            if skymap_needed \
+                    and {'sky_loc', 'public'}.issubset(t) \
+                    and f.endswith('.fits.gz'):
+                skymap_filename = fv
+            if em_bright_needed \
+                    and 'em_bright' in t \
+                    and f.endswith('.json'):
+                em_bright_filename = fv
+            if p_astro_needed \
+                    and 'p_astro' in t \
+                    and f.endswith('.json'):
+                p_astro_filename = fv
+
+    send_canvas = (
+        gracedb.download.s(superevent_id)
+        |
+        gcn.send.s()
+    )
+
+    if alert_type == 'preliminary':
+        send_canvas |= gracedb.create_label.si(
+            'GCN_PRELIM_SENT', superevent_id)
+
     (
-        gracedb.get_log.si(superevent_id)
-        |
-        _apply_public_tag.s(
-            skymap_filename,
-            em_bright_filename,
-            p_astro_filename,
-            superevent_id
-        )
-        |
-        _unpack_download_create_voevent.s(
-            superevent_id,
-            alert_type
+        group(
+            gracedb.expose.s(superevent_id),
+            *(
+                gracedb.create_tag.s(filename, 'public', superevent_id)
+                for filename in [
+                    skymap_filename, em_bright_filename, p_astro_filename
+                ]
+                if filename is not None
+            )
         )
         |
         group(
-            gracedb.download.s(superevent_id)
-            |
-            gcn.send.s(),
+            gracedb.download.si(em_bright_filename, superevent_id),
+            gracedb.download.si(p_astro_filename, superevent_id),
+        )
+        |
+        _create_voevent.s(
+            superevent_id,
+            alert_type,
+            skymap_filename=skymap_filename,
+            internal=False,
+            open_alert=True,
+            vetted=True
+        )
+        |
+        group(
+            send_canvas,
 
             circulars.create_initial_circular.si(superevent_id)
             |
@@ -639,58 +615,54 @@ def initial_or_update_alert(superevent_id, alert_type, skymap_filename=None,
     ).apply_async()
 
 
-@app.task(ignore_result=True, shared=False)
-def initial_alert(superevent_id, skymap_filename=None,
-                  em_bright_filename=None, p_astro_filename=None):
+@gracedb.task(ignore_result=True, shared=False)
+def initial_alert(filenames, superevent_id):
     """Produce an initial alert.
 
     This does nothing more than call
-    :meth:`~gwcelery.tasks.orchestrator.initial_or_update_alert` with
+    :meth:`~gwcelery.tasks.orchestrator.preliminary_initial_update_alert` with
     ``alert_type='initial'``.
 
     Parameters
     ----------
+    filenames : tuple
+        A list of the sky map, em_bright, and p_astro filenames.
     superevent_id : str
         The superevent ID.
-    skymap_filename : str, optional
-        The sky map to send.
-        If None, then most recent public sky map is used.
-    em_bright_filename : str, optional
-        The source classification file to use.
-        If None, then most recent one is used.
-    p_astro_filename : str, optional
-        The p_astro file to use.
-        If None, then most recent one is used.
+
+    Notes
+    -----
+    This function is decorated with :obj:`gwcelery.tasks.gracedb.task` rather
+    than :obj:`gwcelery.app.task` so that a synchronous call to
+    :func:`gwcelery.tasks.gracedb.get_log` is retried in the event of GraceDB
+    API failures.
     """
-    initial_or_update_alert(superevent_id, 'initial', skymap_filename,
-                            em_bright_filename, p_astro_filename)
+    preliminary_initial_update_alert(filenames, superevent_id, 'initial')
 
 
-@app.task(ignore_result=True, shared=False)
-def update_alert(superevent_id, skymap_filename=None,
-                 em_bright_filename=None, p_astro_filename=None):
+@gracedb.task(ignore_result=True, shared=False)
+def update_alert(filenames, superevent_id):
     """Produce an update alert.
 
     This does nothing more than call
-    :meth:`~gwcelery.tasks.orchestrator.initial_or_update_alert` with
+    :meth:`~gwcelery.tasks.orchestrator.preliminary_initial_update_alert` with
     ``alert_type='update'``.
 
     Parameters
     ----------
+    filenames : tuple
+        A list of the sky map, em_bright, and p_astro filenames.
     superevent_id : str
         The superevent ID.
-    skymap_filename : str, optional
-        The sky map to send.
-        If None, then most recent public sky map is used.
-    em_bright_filename : str, optional
-        The source classification file to use.
-        If None, then most recent one is used.
-    p_astro_filename : str, optional
-        The p_astro file to use.
-        If None, then most recent one is used.
+
+    Notes
+    -----
+    This function is decorated with :obj:`gwcelery.tasks.gracedb.task` rather
+    than :obj:`gwcelery.app.task` so that a synchronous call to
+    :func:`gwcelery.tasks.gracedb.get_log` is retried in the event of GraceDB
+    API failures.
     """
-    initial_or_update_alert(superevent_id, 'update', skymap_filename,
-                            em_bright_filename, p_astro_filename)
+    preliminary_initial_update_alert(filenames, superevent_id, 'update')
 
 
 @app.task(ignore_result=True, shared=False)
@@ -698,6 +670,8 @@ def retraction_alert(superevent_id):
     """Produce a retraction alert. This is currently just a stub and does
     nothing more than create and send a VOEvent."""
     (
+        gracedb.expose.si(superevent_id)
+        |
         _create_voevent.si(
             None, superevent_id, 'retraction',
             internal=False,

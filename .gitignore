@@ -1,4 +1,5 @@
 # Files created by editing, developing, running tests
+.DS_Store
 .*.swp
 *~
 *.egg-info
@@ -21,7 +22,6 @@ celerybeat-schedule
 *.sock
 
 # Files created if the source directory is also the home directory
-data
 public_html
 .astropy
 .bash_history

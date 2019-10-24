@@ -10,7 +10,7 @@ explanation on jinja is here http://jinja.pocoo.org . #}
 
 {# IMRPhenomPv2_ROQ can not be applied for large massratio #}
 {% if q <= 0.143 %}
-    {% set approx = 'SEOBNRv4_ROM' %}
+    {% set approx = 'SEOBNRv4_ROMpseudoFourPN' %}
     {% set roqdir = '/home/cbc/ROQ_data/SEOBNRv4ROQ/' %}
 {% endif %}
 
@@ -101,7 +101,7 @@ threshold-snr=3
 # ppanalysis=%(lalsuite-install)s/bin/cbcBayesPPAnalysis
 # pos_to_sim_inspiral=%(lalsuite-install)s/bin/cbcBayesPosToSimInspiral
 
-mpirun=mpirun
+mpirun={{ mpirun }}
 accounting_group={{ accounting_group  }}
 # Remove the following line when you start a run manually based on this ini
 # file.

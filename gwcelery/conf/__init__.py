@@ -181,55 +181,88 @@ idq_veto = {'gstlal': False,
 Currently all False, pending iDQ review (should be done before O3).
 """
 
-p_astro_livetime = 14394240
-"""livetime (units: sec) corresponding to mean values of Poisson counts.
-   (Used by :mod:`gwcelery.tasks.p_astro`)
-"""
-
-p_astro_url = \
-    'http://emfollow.ldas.cit/data/H1L1V1-mean_counts-1126051217-61603201.json'
-"""URL for mean values of Poisson counts using which p_astro
-is computed. (Used by :mod:`gwcelery.tasks.p_astro`)
-"""
-
-p_astro_thresh_url = 'http://emfollow.ldas.cit/data/' \
-    'H1L1V1-pipeline-far_snr-thresholds.json'
-"""URL for pipeline thresholds on FAR and SNR.
-(Used by :mod:`gwcelery.tasks.p_astro`)
-"""
-
-em_bright_url = 'http://emfollow.ldas.cit/data/em_bright_classifier.pickle'
-"""URL for trained RandomForestClassifier based on which em_bright
-classification is conducted. (Used by :mod:`gwcelery.tasks.em_bright`)
-"""
-
 low_latency_frame_types = {'H1': 'H1_O2_llhoft',
                            'L1': 'L1_O2_llhoft',
                            'V1': 'V1_O2_llhoft'}
-"""Types of low latency frames used in Parameter Estimation with LALInference
-(see :mod:`gwcelery.tasks.lalinference`) and in cache creation for detchar
+"""Types of low latency frames used in Parameter Estimation (see
+:mod:`gwcelery.tasks.inference`) and in cache creation for detchar
 checks (see :mod:`gwcelery.tasks.detchar`).
 """
 
 high_latency_frame_types = {'H1': None,
                             'L1': None,
                             'V1': None}
-"""Types of high latency frames used in Parameter Estimation with LALInference
-and in cache creation for detchar checks. They do not exist for O2Replay data.
-(see :mod:`gwcelery.tasks.lalinference` and :mod:`gwcelery.tasks.detchar`)
+"""Types of high latency frames used in Parameter Estimation and in cache
+creation for detchar checks. They do not exist for O2Replay data. (see
+:mod:`gwcelery.tasks.inference` and :mod:`gwcelery.tasks.detchar`)
 """
 
 strain_channel_names = {'H1': 'H1:GDS-CALIB_STRAIN_O2Replay',
                         'L1': 'L1:GDS-CALIB_STRAIN_O2Replay',
                         'V1': 'V1:Hrec_hoft_16384Hz_O2Replay'}
-"""Names of h(t) channels used in Parameter Estimation with LALInference (see
-:mod:`gwcelery.tasks.lalinference`)"""
+"""Names of h(t) channels used in Parameter Estimation (see
+:mod:`gwcelery.tasks.inference`)"""
 
 state_vector_channel_names = {'H1': 'H1:GDS-CALIB_STATE_VECTOR',
                               'L1': 'L1:GDS-CALIB_STATE_VECTOR',
                               'V1': 'V1:DQ_ANALYSIS_STATE_VECTOR'}
-"""Names of state vector channels used in Parameter Estimation with
-LALInference (see :mod:`gwcelery.tasks.lalinference`)"""
+"""Names of state vector channels used in Parameter Estimation (see
+:mod:`gwcelery.tasks.inference`)"""
+
+detchar_bit_definitions = {
+    'dmt_dq_vector_bits':
+        {'channel': 'DMT-DQ_VECTOR',
+         'bits': {
+             1: 'NO_OMC_DCPD_ADC_OVERFLOW',
+             2: 'NO_DMT-ETMY_ESD_DAC_OVERFLOW'
+         },
+         'description': {
+             'NO_OMC_DCPD_ADC_OVERFLOW': 'OMC DCPC ADC not overflowing',
+             'NO_DMT-ETMY_ESD_DAC_OVERFLOW': 'ETMY ESD DAC not overflowing'
+         }
+        },
+    'ligo_state_vector_bits':
+        {'channel': 'GDS-CALIB_STATE_VECTOR',
+         'bits': {
+             0: 'HOFT_OK',
+             1: 'OBSERVATION_INTENT',
+             5: 'NO_STOCH_HW_INJ',
+             6: 'NO_CBC_HW_INJ',
+             7: 'NO_BURST_HW_INJ',
+             8: 'NO_DETCHAR_HW_INJ'
+         },
+         'description': {
+             'HOFT_OK': 'h(t) was successfully computed',
+             'OBSERVATION_INTENT': '"observation intent" button is pushed',
+             'NO_STOCH_HW_INJ': 'No stochastic HW injection',
+             'NO_CBC_HW_INJ': 'No CBC HW injection',
+             'NO_BURST_HW_INJ': 'No burst HW injection',
+             'NO_DETCHAR_HW_INJ': 'No HW injections for detector characterization'  # noqa: E501
+         }
+        },
+    'virgo_state_vector_bits':
+        {'channel': 'DQ_ANALYSIS_STATE_VECTOR',
+         'bits': {
+             0: 'HOFT_OK',
+             1: 'OBSERVATION_INTENT',
+             5: 'NO_STOCH_HW_INJ',
+             6: 'NO_CBC_HW_INJ',
+             7: 'NO_BURST_HW_INJ',
+             8: 'NO_DETCHAR_HW_INJ',
+             10: 'GOOD_DATA_QUALITY_CAT1'
+         },
+         'description': {
+             'HOFT_OK': 'h(t) was successfully computed',
+             'OBSERVATION_INTENT': '"observation intent" button is pushed',
+             'NO_STOCH_HW_INJ': 'No stochastic HW injection',
+             'NO_CBC_HW_INJ': 'No CBC HW injection',
+             'NO_BURST_HW_INJ': 'No burst HW injection',
+             'NO_DETCHAR_HW_INJ': 'No HW injections for detector characterization',  # noqa: E501
+             'GOOD_DATA_QUALITY_CAT1': 'Good data quality (CAT1 type)'
+         }
+        }
+}
+"""Bit definitions for detchar checks"""
 
 pe_threshold = 1.0 / (28 * 86400)
 """FAR threshold in Hz for Parameter Estimation. PE group now applies
@@ -237,12 +270,12 @@ pe_threshold = 1.0 / (28 * 86400)
 
 pe_results_path = os.path.join(os.getenv('HOME'), 'public_html/online_pe')
 """Path to the results of Parameter Estimation (see
-:mod:`gwcelery.tasks.lalinference`)"""
+:mod:`gwcelery.tasks.inference`)"""
 
 pe_results_url = ('https://ldas-jobs.ligo.caltech.edu/~{}/'
                   'online_pe/').format(getpass.getuser())
 """URL of page where all the results of Parameter Estimation are outputted
-(see :mod:`gwcelery.tasks.lalinference`)"""
+(see :mod:`gwcelery.tasks.inference`)"""
 
 raven_coincidence_windows = {'GRB_CBC': [-5, 1],
                              'GRB_Burst': [-600, 60],
@@ -250,3 +283,7 @@ raven_coincidence_windows = {'GRB_CBC': [-5, 1],
 """Time coincidence windows passed to ligo-raven. External events and
 superevents of the appropriate type are considered to be coincident if
 within time window of each other."""
+
+mock_events_simulate_multiple_uploads = False
+"""If True, then upload each mock event several times in rapid succession with
+random jitter in order to simulate multiple pipeline uploads."""
