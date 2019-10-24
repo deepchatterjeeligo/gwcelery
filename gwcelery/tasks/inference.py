@@ -481,12 +481,18 @@ def dag_finished(rundir, preferred_event_id, superevent_id, pe_pipeline):
             (rundir, 'posterior*.hdf5',
              'LALInference posterior samples',
              'LALInference.posterior_samples.hdf5'),
-            (pe_results_path, 'extrinsic.png',
+            (pe_results_path, 'Online_extrinsic.png',
              'LALInference corner plot for extrinsic parameters',
              'LALInference.extrinsic.png'),
-            (pe_results_path, 'sourceFrame.png',
+            (pe_results_path, 'Online_sourceframe.png',
              'LALInference corner plot for source frame parameters',
              'LALInference.intrinsic.png'),
+            (pe_results_path, 'Online_default_pepredicates_bar.png',
+             'Source classification from PE',
+             'LALInference.classification.png'),
+            (pe_results_path, 'Online_population_pepredicates_bar.png',
+             'Source classification from PE after reweighting to population prior',
+             'LALInference.population_reweighted_classification.png'),
         ]
 
     elif pe_pipeline == 'bilby':
