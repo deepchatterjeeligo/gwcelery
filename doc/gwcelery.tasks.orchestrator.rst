@@ -9,7 +9,7 @@ The orchestrator consists of two LVAlert message handlers:
 
 * :meth:`~gwcelery.tasks.orchestrator.handle_superevent` is called for each
   superevent. It waits for a short duration of
-  :obj:`~gwcelery.conf.orchestrator_timeout` seconds for the selection of the
+  :obj:`~gwcelery.conf.preliminary_alert_timeout` seconds for the selection of the
   superevent by the :mod:`superevent manager <gwcelery.tasks.superevents>` to
   stabilize, then performs data quality checks. If the data quality checks
   pass, then it calls :meth:`~gwcelery.tasks.orchestrator.preliminary_alert` to
@@ -59,9 +59,9 @@ The flow chart below illustrates the operation of these two tasks.
         href = "../gwcelery.tasks.orchestrator.html#gwcelery.tasks.orchestrator.handle_superevent"
         label = <<B><FONT face="monospace">handle_superevent</FONT></B>>
 
-        orchestrator_timeout [
-            href = "../gwcelery.conf.html#gwcelery.conf.orchestrator_timeout"
-            label = <Wait<BR/><B><FONT face="monospace">orchestrator_timeout</FONT></B><BR/>seconds>
+        preliminary_alert_timeout [
+            href = "../gwcelery.conf.html#gwcelery.conf.preliminary_alert_timeout"
+            label = <Wait<BR/><B><FONT face="monospace">preliminary_alert_timeout</FONT></B><BR/>seconds>
         ]
 
         get_preferred_event [
@@ -111,9 +111,9 @@ The flow chart below illustrates the operation of these two tasks.
         }
     }
 
-    superevent -> orchestrator_timeout [lhead = cluster_handle_superevent]
+    superevent -> preliminary_alert_timeout [lhead = cluster_handle_superevent]
 
-    orchestrator_timeout
+    preliminary_alert_timeout
     -> get_preferred_event
     -> check_vectors
     -> offline_event

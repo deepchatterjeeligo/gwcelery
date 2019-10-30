@@ -103,13 +103,12 @@ preliminary_alert_trials_factor = dict(cbc=4.0, burst=3.0)
 factor is the number of pipelines. CBC pipelines are gstlal, pycbc, mbtaonline
 and spiir. Burst searches are cwb.allsky, cwb.bbh and cwb.imbh."""
 
-orchestrator_timeout = 300.0
-"""The orchestrator will wait this many seconds from the time of the
-creation of a new superevent to the time that annotations begin, in order
-to let the superevent manager's decision on the preferred event
-stabilize."""
+preliminary_alert_timeout = 300.0
+"""Wait this many seconds from the time of the creation of a new superevent to
+the time that annotations begin, in order to let the superevent manager's
+decision on the preferred event stabilize."""
 
-pe_timeout = orchestrator_timeout + 45.0
+pe_timeout = preliminary_alert_timeout + 45.0
 """The orchestrator will wait this many seconds from the time of the
 creation of a new superevent to the time that parameter estimation begins, in
 case the preferred event is updated with high latency."""

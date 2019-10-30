@@ -50,7 +50,7 @@ def handle_superevent(alert):
     """Schedule annotations for new superevents.
 
     After waiting for a time specified by the
-    :obj:`~gwcelery.conf.orchestrator_timeout` configuration variable
+    :obj:`~gwcelery.conf.preliminary_alert_timeout` configuration variable
     for the choice of preferred event to settle down, this task performs data
     quality checks with :meth:`gwcelery.tasks.detchar.check_vectors` and
     calls :meth:`~gwcelery.tasks.orchestrator.preliminary_alert` to send a
@@ -78,7 +78,7 @@ def handle_superevent(alert):
         if label_name == 'EM_Selected':
             (
                 _get_preferred_event.si(superevent_id).set(
-                    countdown=app.conf['orchestrator_timeout']
+                    countdown=app.conf['preliminary_alert_timeout']
                 )
                 |
                 gracedb.get_event.s()
