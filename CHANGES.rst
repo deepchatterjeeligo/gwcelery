@@ -46,6 +46,11 @@ This is the initial release of GWCelery for O3b.
 -   Add a task to ``em_bright.py`` to compute and upload source properties
     upon the upload of ``LALInference.posterior_samples.hdf5``.
 
+-   Add event completeness to publishability criterion. All three
+    ``PASTRO_READY``, ``SKYMAP_READY`` and ``EMBRIGHT_READY`` will be used to
+    evaluate event completeness for CBC events. Only the ``SKYMAP_READY`` will
+    be used to evalute completeness for burst events.
+
 0.8.7 (2019-09-14)
 ------------------
 

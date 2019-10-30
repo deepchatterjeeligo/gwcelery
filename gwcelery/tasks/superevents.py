@@ -27,8 +27,12 @@ def handle(payload):
     pipelines and delegate to :meth:`process` for
     superevent management.
     """
-    if payload['alert_type'] != 'new':
-        return
+    if payload['alert_type'] == 'label_added':
+        group = payload['object']['group'].lower()
+        if payload['data']['name'] not in REQUIRED_LABELS[group]:
+            return
+    elif payload['alert_type'] != 'new':
+        pass
 
     gid = payload['uid']
 
@@ -260,12 +264,35 @@ def get_instruments_in_ranking_statistic(event):
                 if single.get('chisq') is not None}
 
 
+REQUIRED_LABELS = {
+    'cbc': {'PASTRO_READY', 'EMBRIGHT_READY', 'SKYMAP_READY'},
+    'burst': {'SKYMAP_READY'}
+}
+
+
+def is_complete(event):
+    """Determine if a G event is complete in the sense of the event has its
+    data products complete i.e. has PASTRO_READY, SKYMAP_READY, EMBRIGHT_READY
+    for CBC events and the SKYMAP_READY label for the Burst events. Test events
+    are not processed by low-latency infrastructure and are always labeled
+    complete.
+
+    Parameters
+    ----------
+    event : dict
+        Event dictionary (e.g., the return value from
+        :meth:`gwcelery.tasks.gracedb.get_event`).
+    """
+    group = event['group'].lower()
+    return REQUIRED_LABELS[group].issubset(event['labels'])
+
+
 def _should_publish_keyfunc(event):
     group = event['group'].lower()
     trials_factor = app.conf['preliminary_alert_trials_factor'][group]
     far_threshold = app.conf['preliminary_alert_far_threshold'][group]
     far = trials_factor * event['far']
-    return not event['offline'], far <= far_threshold
+    return not event['offline'], far <= far_threshold, is_complete(event)
 
 
 def should_publish(event):
