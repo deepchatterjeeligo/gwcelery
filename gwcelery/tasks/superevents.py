@@ -304,19 +304,6 @@ def get_instruments_in_ranking_statistic(event):
                 if single.get('chisq') is not None}
 
 
-@app.task(shared=False)
-def select_preferred_event(events):
-    """Select the preferred event out of a list of events,
-    typically contents of a superevent, based on :meth:`keyfunc`.
-
-    Parameters
-    ----------
-    events : list
-        list of event dictionaries
-    """
-    return min(events, key=keyfunc)
-
-
 def is_complete(event):
     """
     Determine if a G event is complete in the sense of the event
