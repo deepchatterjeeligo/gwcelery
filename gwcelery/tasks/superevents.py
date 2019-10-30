@@ -296,7 +296,7 @@ def keyfunc(event):
 
     Return a value suitable for identifying the preferred event. Given events
     ``a`` and ``b``, ``a`` is preferred over ``b`` if
-    ``keyfunc(a) < keyfunc(b)``, else ``b`` is preferred.
+    ``keyfunc(a) > keyfunc(b)``, else ``b`` is preferred.
 
     Parameters
     ----------
@@ -316,17 +316,19 @@ def keyfunc(event):
     """
     group = event['group'].lower()
     try:
-        group_rank = ['cbc', 'burst'].index(group)
+        group_rank = ['burst', 'cbc'].index(group)
     except ValueError:
-        group_rank = float('inf')
+        group_rank = -1
 
     if group == 'cbc':
-        ifo_rank = -len(get_instruments(event))
-        tie_breaker = -get_snr(event)
+        n_ifos = len(get_instruments(event))
+        significance = get_snr(event)
     else:
-        ifo_rank = 0
-        tie_breaker = event['far']
-    return not should_publish(event), group_rank, ifo_rank, tie_breaker
+        # We don't care about the number of detectors for burst events
+        n_ifos = -1
+        # Inverse false alarm rate: longer waiting time -> more significant
+        significance = 1 / event['far']
+    return should_publish(event), group_rank, n_ifos, significance
 
 
 def _update_superevent(superevent, new_event_dict,
@@ -360,7 +362,7 @@ def _update_superevent(superevent, new_event_dict,
         kwargs['t_start'] = t_start
     if t_end is not None:
         kwargs['t_end'] = t_end
-    if keyfunc(new_event_dict) < keyfunc(preferred_event_dict):
+    if keyfunc(new_event_dict) > keyfunc(preferred_event_dict):
         kwargs['t_0'] = t_0
         kwargs['preferred_event'] = new_event_dict['graceid']
 
