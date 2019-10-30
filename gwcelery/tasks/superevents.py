@@ -260,6 +260,14 @@ def get_instruments_in_ranking_statistic(event):
                 if single.get('chisq') is not None}
 
 
+def _should_publish_keyfunc(event):
+    group = event['group'].lower()
+    trials_factor = app.conf['preliminary_alert_trials_factor'][group]
+    far_threshold = app.conf['preliminary_alert_far_threshold'][group]
+    far = trials_factor * event['far']
+    return not event['offline'], far <= far_threshold
+
+
 def should_publish(event):
     """Determine whether an event should be published as a public alert.
 
@@ -284,11 +292,7 @@ def should_publish(event):
         :obj:`True` if the event meets the criteria for a public alert or
         :obj:`False` if it does not.
     """
-    group = event['group'].lower()
-    trials_factor = app.conf['preliminary_alert_trials_factor'][group]
-    far_threshold = app.conf['preliminary_alert_far_threshold'][group]
-    far = trials_factor * event['far']
-    return not event['offline'] and far <= far_threshold
+    return all(_should_publish_keyfunc(event))
 
 
 def keyfunc(event):
@@ -328,7 +332,7 @@ def keyfunc(event):
         n_ifos = -1
         # Inverse false alarm rate: longer waiting time -> more significant
         significance = 1 / event['far']
-    return should_publish(event), group_rank, n_ifos, significance
+    return (*_should_publish_keyfunc(event), group_rank, n_ifos, significance)
 
 
 def _update_superevent(superevent, new_event_dict,
