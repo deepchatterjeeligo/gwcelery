@@ -363,7 +363,6 @@ def test_handle_cbc_event_new_event(mock_classifier):
             "graceid": "G000003",
             "gpstime": 100.0,
             "pipeline": "gstlal",
-            "labels": [],
             "group": "CBC",
             "search": "AllSky",
             "far": 1.e-31,
@@ -390,7 +389,7 @@ def test_handle_cbc_event_new_event(mock_classifier):
 @patch(
     'gwcelery.tasks.gracedb.get_event._orig_run',
     return_value={'graceid': 'T250822', 'group': 'CBC', 'pipeline': 'gstlal',
-                  'far': 1e-7, 'labels': [],
+                  'far': 1e-7,
                   'extra_attributes':
                       {'CoincInspiral': {'snr': 10.},
                        'SingleInspiral': [{'mass1': 10., 'mass2': 5.}]}})

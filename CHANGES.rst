@@ -36,11 +36,6 @@ This is the initial release of GWCelery for O3b.
 
 -   Use mpich as the MPI runtime for parameter estimation.
 
--   Add event completeness to publishability criterion. All three of
-    ``PASTRO_READY``, ``SKYMAP_READY``, and ``EMBRIGHT_READY`` will be used to
-    evaluate event completeness for CBC events. Only the ``SKYMAP_READY`` label
-    will be used to evaluate completeness for burst events.
-
 -   Revert back to running BAYESTAR for all ``G`` events.
 
 -   Make skymaps from parameter estimation public automatically.
