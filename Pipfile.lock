@@ -79,6 +79,12 @@
             ],
             "version": "==0.4"
         },
+        "astroquery": {
+            "hashes": [
+                "sha256:1ce57a8792c7d5d74206d797d379de6da35d56be433ea5840c41a49f202e2fab"
+            ],
+            "version": "==0.3.10"
+        },
         "atomicwrites": {
             "hashes": [
                 "sha256:03472c30eb2c5d1ba9227e4c2ca66ab8287fbfbbda3888aa93dc2e28fc6811b4",
@@ -113,6 +119,14 @@
                 "sha256:bbbf4b1e5cd2bdb08f915895b51081c041bac22394fdfcfdfbe9f14b77c08bf2"
             ],
             "version": "==0.1.0"
+        },
+        "beautifulsoup4": {
+            "hashes": [
+                "sha256:5279c36b4b2ec2cb4298d723791467e3000e5384a43ea0cdf5d45207c7e97169",
+                "sha256:6135db2ba678168c07950f9a16c4031822c6f4aec75a65e0a97bc5ca09789931",
+                "sha256:dcdef580e18a76d54002088602eba453eec38ebbcafafeaabd8cab12b6155d57"
+            ],
+            "version": "==4.8.1"
         },
         "billiard": {
             "hashes": [
@@ -180,6 +194,13 @@
                 "sha256:fd82eb4694be712fcae03c717ca2e0fc720657ac226b80bbb597e971fc6928c2"
             ],
             "version": "==1.13.1"
+        },
+        "chardet": {
+            "hashes": [
+                "sha256:84ab92ed1c4d4f16916e05906b6b75a6c0fb5db821cc65e70cbd64a3e2a5eaae",
+                "sha256:fc323ffcaeaed0e0a02bf4d117757b98aed530d9ed4531e3e15460124c106691"
+            ],
+            "version": "==3.0.4"
         },
         "click": {
             "hashes": [
@@ -267,6 +288,13 @@
                 "sha256:f6fb79a80fc5df47672468f914da38c0ea35e8ba78fb247b756769a033f7b961"
             ],
             "version": "==1.0.1"
+        },
+        "entrypoints": {
+            "hashes": [
+                "sha256:589f874b313739ad35be6e0cd7efde2a4e9b6fea91edcc34e58ecbb8dbe56d19",
+                "sha256:c70dd71abe5a8c85e55e12c19bd91ccfeec11a6e99044204511f9ed547d48451"
+            ],
+            "version": "==0.3"
         },
         "flask": {
             "hashes": [
@@ -364,6 +392,13 @@
                 "sha256:e92af538530898468fe746ab0f4964d88dee598805050bc175ae62f67735869d"
             ],
             "version": "==1.12.10"
+        },
+        "html5lib": {
+            "hashes": [
+                "sha256:20b159aa3badc9d5ee8f5c647e5efd02ed2a66ab8d354930bd9ff139fc1dc0a3",
+                "sha256:66cb0dcfdbbc4f9c3ba1a63fdb511ffdbd4f513b2b6d81b80cd26ce6b3fb3736"
+            ],
+            "version": "==1.0.1"
         },
         "humanize": {
             "hashes": [
@@ -479,6 +514,13 @@
             ],
             "version": "==4.6.1"
         },
+        "keyring": {
+            "hashes": [
+                "sha256:91037ccaf0c9a112a76f7740e4a416b9457a69b66c2799421581bee710a974b3",
+                "sha256:f5bb20ea6c57c2360daf0c591931c9ea0d7660a8d9e32ca84d63273f131ea605"
+            ],
+            "version": "==19.2.0"
+        },
         "kiwisolver": {
             "hashes": [
                 "sha256:05b5b061e09f60f56244adc885c4a7867da25ca387376b02c1efc29cc16bcd0f",
@@ -571,13 +613,15 @@
         },
         "ligo.skymap": {
             "hashes": [
-                "sha256:6f077e81ca2475c82214a936c911e58a44bd56ab2548946e1a020988f7f1a94d",
-                "sha256:8e6b4a505a1d237d79b96e296d3b3c5b15b2994bb5bb3b5fbc11f339fd51db42",
-                "sha256:a8454121805009227ec1615d4fec296ac167a1c86e51ce7596764b38e93ae0dd",
-                "sha256:f48a65a44aa3c3aa489ab529737fe4dc9d13ca008d8e43ba1ea7baecfb351c4f",
-                "sha256:f599ea873143a166d8c6d8dda81754792bd0868b1a810824138ea33332685e2b"
+                "sha256:1d4ae83539293c8283f4b92c223e0d667be46a7e1d62f27f6df737ad52c6e3f6",
+                "sha256:5853fe76a29902e496ffbda1f0be857b49ecb5f982ed7a388bf2a335c81484d3",
+                "sha256:5961abe23a2e39a02774aae7a1b9779bc50e22ed630b1f76cf8d503df7882bf7",
+                "sha256:5ad92321e6e5d218b6cfaf4790ad13177adbc11db92f49966bb5ab54678fe497",
+                "sha256:c7efabaa04a62dc64b75b14b4fb1c3410d699bdc2c1492eb5d09388438e30be5",
+                "sha256:cdb858628b9bc0a9fe71ea69280d580dc2109aa640f7d53a3174c1167219b980",
+                "sha256:d42939a4adb72803ba8ae1d2e429647a79a7d94c2a6486ef480eea196f64389c"
             ],
-            "version": "==0.1.9"
+            "version": "==0.1.13"
         },
         "ligotimegps": {
             "hashes": [
@@ -997,6 +1041,13 @@
             ],
             "version": "==0.5.1"
         },
+        "requests": {
+            "hashes": [
+                "sha256:11e007a8a2aa0323f5a921e9e6a2d7e4e67d9877e85773fba9ba6419025cbeb4",
+                "sha256:9cf5292fcd0f598c671cfc1e0d7d1a7f13bb8085e9a590f48c010551dc6c4b31"
+            ],
+            "version": "==2.22.0"
+        },
         "safe-netrc": {
             "hashes": [
                 "sha256:161c18c7bed22c0be8a3d7e29801addedf85950d80663f3acdecc12c025d441d",
@@ -1114,6 +1165,13 @@
             ],
             "version": "==1.3.3"
         },
+        "soupsieve": {
+            "hashes": [
+                "sha256:605f89ad5fdbfefe30cdc293303665eff2d188865d4dbe4eb510bba1edfbfce3",
+                "sha256:b91d676b330a0ebd5b21719cb6e9b57c57d433671f65b9c28dd3461d9a1ed0b6"
+            ],
+            "version": "==1.9.4"
+        },
         "tornado": {
             "hashes": [
                 "sha256:0662d28b1ca9f67108c7e3b77afabfb9c7e87bde174fbda78186ecedc2499a9d",
@@ -1191,6 +1249,13 @@
                 "sha256:f4ebe71925af7b40a864553f761ed559b43544f8f71746c2d756c7fe788ade7c"
             ],
             "version": "==0.1.7"
+        },
+        "webencodings": {
+            "hashes": [
+                "sha256:a0af1213f3c2226497a97e2b3aa01a7e4bee4f403f95be16fc9acd2947514a78",
+                "sha256:b36a1c245f2d304965eb4e0a82848379241dc04b865afcc4aab16748587e1923"
+            ],
+            "version": "==0.5.1"
         },
         "werkzeug": {
             "hashes": [
