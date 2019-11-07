@@ -399,84 +399,84 @@ def preliminary_alert(event, superevent_id):
     if skymap_filename.endswith('.fits'):
         skymap_filename += '.gz'
 
-    # Determine if the event should be made public.
     is_publishable = (superevents.should_publish(event)
                       and {'DQV', 'INJ'}.isdisjoint(event['labels']))
 
-    canvas = ordered_group(
-        (
-            _download.si(original_skymap_filename, preferred_event_id)
-            |
-            ordered_group_first(
-                skymaps.flatten.s(skymap_filename)
+    (
+        ordered_group(
+            (
+                _download.si(original_skymap_filename, preferred_event_id)
+                |
+                ordered_group_first(
+                    skymaps.flatten.s(skymap_filename)
+                    |
+                    gracedb.upload.s(
+                        skymap_filename,
+                        superevent_id,
+                        message=(
+                            'Flattened from multiresolution file {}').format(
+                                original_skymap_filename),
+                        tags=['sky_loc', 'public']
+                    )
+                    |
+                    _create_label_and_return_filename.s(
+                        'SKYMAP_READY', superevent_id
+                    ),
+
+                    gracedb.upload.s(
+                        original_skymap_filename,
+                        superevent_id,
+                        message='Localization copied from {}'.format(
+                            preferred_event_id),
+                        tags=['sky_loc', 'public']
+                    ),
+
+                    skymaps.annotate_fits.s(
+                        skymap_filename,
+                        superevent_id,
+                        ['sky_loc', 'public']
+                    )
+                )
+            ) if skymap_filename is not None else identity.s(None),
+
+            (
+                _download.si('em_bright.json', preferred_event_id)
                 |
                 gracedb.upload.s(
-                    skymap_filename,
+                    'em_bright.json',
                     superevent_id,
-                    message='Flattened from multiresolution file {}'.format(
-                        original_skymap_filename),
-                    tags=['sky_loc', 'public']
+                    message='Source properties copied from {}'.format(
+                        preferred_event_id),
+                    tags=['em_bright', 'public']
                 )
                 |
                 _create_label_and_return_filename.s(
-                    'SKYMAP_READY', superevent_id
-                ),
-
-                gracedb.upload.s(
-                    original_skymap_filename,
-                    superevent_id,
-                    message='Localization copied from {}'.format(
-                        preferred_event_id),
-                    tags=['sky_loc', 'public']
-                ),
-
-                skymaps.annotate_fits.s(
-                    skymap_filename,
-                    superevent_id,
-                    ['sky_loc', 'public']
+                    'EMBRIGHT_READY', superevent_id
                 )
-            )
-        ) if skymap_filename is not None else identity.s(None),
+            ) if event['group'] == 'CBC' else identity.s(None),
 
-        (
-            _download.si('em_bright.json', preferred_event_id)
-            |
-            gracedb.upload.s(
-                'em_bright.json',
-                superevent_id,
-                message='Source properties copied from {}'.format(
-                    preferred_event_id),
-                tags=['em_bright', 'public']
-            )
-            |
-            _create_label_and_return_filename.s(
-                'EMBRIGHT_READY', superevent_id
-            )
-        ) if event['group'] == 'CBC' else identity.s(None),
-
-        (
-            _download.si('p_astro.json', preferred_event_id)
-            |
-            gracedb.upload.s(
-                'p_astro.json',
-                superevent_id,
-                message='Source classification copied from {}'.format(
-                    preferred_event_id),
-                tags=['p_astro', 'public']
-            )
-            |
-            _create_label_and_return_filename.s(
-                'PASTRO_READY', superevent_id
-            )
-        ) if event['group'] == 'CBC' else identity.s(None)
-    )
-
-    # Send GCN notice and upload GCN circular draft for online events.
-    if is_publishable:
-        canvas |= preliminary_initial_update_alert.s(
-            superevent_id, 'preliminary')
-
-    canvas.apply_async(priority=priority)
+            (
+                _download.si('p_astro.json', preferred_event_id)
+                |
+                gracedb.upload.s(
+                    'p_astro.json',
+                    superevent_id,
+                    message='Source classification copied from {}'.format(
+                        preferred_event_id),
+                    tags=['p_astro', 'public']
+                )
+                |
+                _create_label_and_return_filename.s(
+                    'PASTRO_READY', superevent_id
+                )
+            ) if event['group'] == 'CBC' else identity.s(None)
+        )
+        |
+        preliminary_initial_update_alert.s(
+            superevent_id, 'preliminary',
+            is_publishable=is_publishable
+        )
+    ).apply_async(priority=priority)
 
 
 @gracedb.task(shared=False)
@@ -532,7 +532,8 @@ def parameter_estimation(far_event, superevent_id):
 
 
 @gracedb.task(ignore_result=True, shared=False)
-def preliminary_initial_update_alert(filenames, superevent_id, alert_type):
+def preliminary_initial_update_alert(filenames, superevent_id, alert_type,
+                                     is_publishable=True):
     """
     Create and send a preliminary, initial, or update GCN notice.
 
@@ -579,7 +580,7 @@ def preliminary_initial_update_alert(filenames, superevent_id, alert_type):
 
     canvas = (
         group(
-            gracedb.expose.s(superevent_id),
+            *((gracedb.expose.s(superevent_id),) if is_publishable else ()),
             *(
                 gracedb.create_tag.s(filename, 'public', superevent_id)
                 for filename in [
@@ -598,8 +599,8 @@ def preliminary_initial_update_alert(filenames, superevent_id, alert_type):
             superevent_id,
             alert_type,
             skymap_filename=skymap_filename,
-            internal=False,
-            open_alert=True,
+            internal=not(is_publishable),
+            open_alert=is_publishable,
             vetted=True
         )
         |
