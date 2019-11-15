@@ -70,6 +70,7 @@ bdist:
       cat <<EOF > Dockerfile
       FROM python:${CI_JOB_NAME#*python}
       COPY requirements.txt .
+      RUN pip install git+https://git.ligo.org/emfollow/gracedb-sdk
       RUN pip --no-cache-dir install -r requirements.txt
       RUN rm -f requirements.txt
       EOF

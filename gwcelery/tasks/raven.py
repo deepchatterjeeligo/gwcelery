@@ -3,8 +3,8 @@ import ligo.raven.search
 import json
 from celery import group
 from celery.utils.log import get_task_logger
-from ligo.gracedb.exceptions import HTTPError
 from ligo.raven import gracedb_events
+from requests.exceptions import HTTPError
 
 from ..import app
 from . import gracedb
@@ -36,7 +36,7 @@ def calculate_coincidence_far(superevent_id, exttrig_id, preferred_id, group):
         ext_skymap = gracedb.download('glg_healpix_all_bn_v00.fit',
                                       exttrig_id)
     except HTTPError as e:
-        if e.status == 404:
+        if e.response.status_code == 404:
             ext_skymap = None
 
     tl_cbc, th_cbc = app.conf['raven_coincidence_windows']['GRB_CBC']

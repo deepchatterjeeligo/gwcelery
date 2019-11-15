@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "c28f7c93e1f58c4226bda37c4616b435fd62b0759c9bdb67eda5edc449dbbc7d"
+            "sha256": "2d5e8339a1a298bc7ccd2f7d438314dc606998f7967c11b13fd0f3dd8b63c251"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -366,6 +366,10 @@
                 "sha256:b1bead90b70cf6ec3f0710ae53a525360fa360d306a86583adc6bf83a4db537d"
             ],
             "version": "==0.18.2"
+        },
+        "gracedb-sdk": {
+            "git": "https://git.ligo.org/emfollow/gracedb-sdk",
+            "ref": "ad058d03a06c6486a5c4e849dc2c0973b6d39898"
         },
         "gwcelery": {
             "editable": true,

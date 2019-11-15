@@ -12,6 +12,7 @@ ipython = "*"
 ipykernel = "*"
 # Pull in flower from GitHub branch to pull in extra features.
 flower = {git = "https://github.com/lpsinger/flower",ref = "custom-stats"}
+gracedb-sdk = {git = "https://git.ligo.org/emfollow/gracedb-sdk"}
 
 [requires]
 python_version = "3.7"

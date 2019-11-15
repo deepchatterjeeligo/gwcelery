@@ -12,8 +12,8 @@ import urllib
 
 from celery import group
 from gwdatafind import find_urls
-from ligo.gracedb.exceptions import HTTPError
 import numpy as np
+from requests.exceptions import HTTPError
 
 from .. import app
 from ..jinja import env
@@ -153,7 +153,7 @@ def prepare_ini(frametype_dict, event, superevent_id=None):
     singleinspiraltable = event['extra_attributes']['SingleInspiral']
     trigtime = event['gpstime']
     ini_settings = {
-        'service_url': gracedb.client._service_url,
+        'service_url': gracedb.client.url,
         'types': frametype_dict,
         'channels': app.conf['strain_channel_names'],
         'state_vector_channels': app.conf['state_vector_channel_names'],
