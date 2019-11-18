@@ -76,7 +76,8 @@ def test_handle_create_subthreshold_grb_event(mock_check_vectors,
 
 
 @patch('gwcelery.tasks.gracedb.replace_event')
-@patch('gwcelery.tasks.gracedb.get_events', return_value=[{'graceid': 'E1'}])
+@patch('gwcelery.tasks.gracedb.get_events',
+       return_value=[{'graceid': 'E1', 'pipeline': 'Fermi'}])
 def test_handle_replace_grb_event(mock_get_events, mock_replace_event):
     text = resource_string(__name__, 'data/fermi_grb_gcn.xml')
     external_triggers.handle_grb_gcn(payload=text)

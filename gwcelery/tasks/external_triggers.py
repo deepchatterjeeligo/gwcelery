@@ -6,6 +6,7 @@ from . import detchar
 from . import gcn
 from . import gracedb
 from . import ligo_fermi_skymaps
+from . import ligo_swift_skymaps
 from . import lvalert
 from . import raven
 
@@ -113,7 +114,11 @@ def handle_grb_gcn(payload):
         start = event['gpstime']
         end = start + event['extra_attributes']['GRB']['trigger_duration']
         detchar.check_vectors(event, event['graceid'], start, end)
-    ligo_fermi_skymaps.get_upload_external_skymap(graceid)
+
+    if event['pipeline'] == 'Fermi':
+        ligo_fermi_skymaps.get_upload_external_skymap(graceid)
+    elif event['pipeline'] == 'Swift':
+        ligo_swift_skymaps.create_upload_swift_skymap(event)
 
 
 @lvalert.handler('superevent',
