@@ -68,7 +68,8 @@ def get_external_skymap_filename(graceid):
     gracedb_log = gracedb.get_log(graceid)
     for message in reversed(gracedb_log):
         filename = message['filename']
-        if (filename.endswith('.fits') or filename.endswith('.fit')):
+        if (filename.endswith('.fits') or filename.endswith('.fit') or
+            filename.endswith('.fits.gz'):
             if 'bayestar' not in filename and 'LALinference' not in filename:
                 return filename
     raise ValueError('No external skymap available for {0} yet.'.format(
