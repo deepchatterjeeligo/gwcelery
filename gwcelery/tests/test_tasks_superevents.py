@@ -319,9 +319,13 @@ def test_update_preferred_event(superevent_labels, new_event_labels,
                     create_label.assert_not_called()
 
 
+@pytest.mark.parametrize('labels',
+                         [['PASTRO_READY', 'EM_SENT'],
+                          ['SKYMAP_READY', 'EMBRIGHT_READY',
+                           'PASTRO_READY', 'EM_SENT']])
 @patch('gwcelery.tasks.gracedb.create_label.run')
 @patch('gwcelery.tasks.gracedb.get_superevent', s100response)
-def test_raven_alert(mock_create_label):
+def test_raven_alert(mock_create_label, labels):
     payload = {
         "uid": "G000003",
         "alert_type": "label_added",
@@ -336,8 +340,7 @@ def test_raven_alert(mock_create_label):
             "superevent": "S100",
             "offline": False,
             "gpstime": 1000000,
-            "labels": ["EM_SENT", "PASTRO_READY",
-                       "EMBRIGHT_READY", "SKYMAP_READY"],
+            "labels": labels,
             'extra_attributes': {
                 'SingleInspiral': [
                     {
@@ -361,7 +364,9 @@ def test_raven_alert(mock_create_label):
         }
     }
     superevents.handle(payload)
-    calls = [call('ADVREQ', 'S100'), call('EM_Selected', 'S100')]
+    calls = [call('ADVREQ', 'S100')]
+    if {'SKYMAP_READY', 'EMBRIGHT_READY', 'PASTRO_READY'}.issubset(labels):
+        calls.append(call('EM_Selected', 'S100'))
     mock_create_label.assert_has_calls(calls)
 
 
