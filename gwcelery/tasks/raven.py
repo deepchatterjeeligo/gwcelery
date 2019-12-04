@@ -29,7 +29,6 @@ def calculate_coincidence_far(superevent, exttrig, group):
         superevent
 
     """
-
     superevent_id = superevent['superevent_id']
     exttrig_id = exttrig['graceid']
 
