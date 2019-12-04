@@ -60,7 +60,7 @@ def handle(payload):
         label = payload['data']['name']
         group = payload['object']['group'].lower()
         if label == 'EM_SENT':
-            pass
+            log.info('Label %s added to %s', label, gid)
         elif label not in REQUIRED_LABELS_BY_GROUP[group]:
             return
     elif alert_type != 'new':
