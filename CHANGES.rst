@@ -12,6 +12,8 @@ Changelog
 
 -   Increase the FAR threshold of online PE to the public alert threshold.
 
+-   Enable RAVEN alert pipeline
+
 0.9.0 (2019-11-23)
 ------------------
 
