@@ -82,7 +82,10 @@ def handle_superevent(alert):
                     tags=['data_quality']
                 )
                 |
-                gracedb.create_label.si('DQOK', superevent_id)
+                gracedb._create_label_and_return_filename.s(
+                    'DQOK',
+                    superevent_id
+                )
                 |
                 preliminary_alert.s(superevent_id)
             ).apply_async()
