@@ -82,11 +82,7 @@ def handle_superevent(alert):
                     tags=['data_quality']
                 )
                 |
-                detchar.check_vectors.s(
-                    superevent_id,
-                    alert['object']['t_start'],
-                    alert['object']['t_end']
-                )
+                gracedb.create_label.si('DQOK', superevent_id)
                 |
                 preliminary_alert.s(superevent_id)
             ).apply_async()
