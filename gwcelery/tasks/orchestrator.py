@@ -82,7 +82,7 @@ def handle_superevent(alert):
                     tags=['data_quality']
                 )
                 |
-                gracedb._create_label_and_return_filename.s(
+                _create_label_and_return_filename.s(
                     'DQOK',
                     superevent_id
                 )
