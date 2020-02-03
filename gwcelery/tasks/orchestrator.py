@@ -588,6 +588,9 @@ def parameter_estimation(far_event, superevent_id):
                 inference.start_pe.s(
                     preferred_event_id, superevent_id, 'bilby'
                 )
+                inference.start_pe.s(
+                    preferred_event_id, superevent_id, 'rift'
+                )
             )
         else:
             canvas |= gracedb.upload.si(

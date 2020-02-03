@@ -324,6 +324,69 @@ def _setup_dag_for_bilby(event, rundir, preferred_event_id, superevent_id):
     return path_to_dag
 
 
+def _set_up_rift(coinc_psd, ini_contents, rundir, superevent_id):
+    """Create DAG for a rift run and return the path to DAG.
+
+    Parameters
+    ----------
+    coinc_psd : tuple of byte contents
+        Tuple of the byte contents of ``coinc.xml`` and ``psd.xml.gz``
+    ini_contents : str
+        The content of online_lalinference_pe.ini
+    rundir : str
+        The path to a run directory where the DAG file exits
+    superevent_id : str
+        The GraceDB ID of a target superevent
+
+    Returns
+    -------
+    path_to_dag : str
+        The path to the .dag file
+    """
+    coinc_contents, psd_contents = coinc_psd
+
+    # write down coinc.xml in the run directory
+    path_to_coinc = os.path.join(rundir, 'coinc.xml')
+    with open(path_to_coinc, 'wb') as f:
+        f.write(coinc_contents)
+
+    # write down psd.xml.gz
+    if psd_contents is not None:
+        path_to_psd = os.path.join(rundir, 'psd.xml.gz')
+        with open(path_to_psd, 'wb') as f:
+            f.write(psd_contents)
+        psd_arg = ['--use-online-psd-file', path_to_psd]
+    else:
+        psd_arg = []
+
+    # write down .ini file in the run directory.
+    path_to_ini = os.path.join(rundir, ini_name)
+    with open(path_to_ini, 'w') as f:
+        f.write(ini_contents)
+
+    try:
+        subprocess.run(
+            ['python', 'util_RIFT_pseudo_pipe.py', '--use-ini', path_to_ini,
+	     '--use-coinc', path_to_coinc, '--use-rundir', rundir] + psd_arg,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    except subprocess.CalledProcessError as e:
+        contents = b'args:\n' + json.dumps(e.args[1]).encode('utf-8') + \
+                   b'\n\nstdout:\n' + e.stdout + b'\n\nstderr:\n' + e.stderr
+        gracedb.upload.delay(
+            filecontents=contents, filename='pe_dag.log',
+            graceid=superevent_id,
+            message='Failed to prepare DAG for lalinference', tags='pe'
+        )
+        shutil.rmtree(rundir)
+        raise
+    else:
+        # Remove the ini file so that people do not accidentally use this ini
+        # file and hence online-PE-only nodes.
+        os.remove(path_to_ini)
+
+    return os.path.join(rundir, 'multidag.dag')
+
+
 @app.task(shared=False)
 def _condor_no_submit(path_to_dag):
     """Run 'condor_submit_dag -no_submit' and return the path to .sub file."""
@@ -347,10 +410,10 @@ def dag_prepare_task(rundir, superevent_id, preferred_event_id, pe_pipeline,
         The GraceDB ID of a target preferred event
     pe_pipeline : str
         The parameter estimation pipeline used
-        Either 'lalinference' OR 'bilby'
+        Either 'lalinference', 'bilby' or 'rift'
     ini_contents : str
         The content of online_lalinference_pe.ini
-        Required if pe_pipeline == 'lalinference'
+        Required if pe_pipeline == 'lalinference' or 'rift'
 
     Returns
     -------
@@ -366,6 +429,11 @@ def dag_prepare_task(rundir, superevent_id, preferred_event_id, pe_pipeline,
     elif pe_pipeline == 'bilby':
         canvas = gracedb.get_event.si(preferred_event_id) | \
             _setup_dag_for_bilby.s(rundir, preferred_event_id, superevent_id)
+    elif pe_pipeline == 'rift':
+        canvas = ordered_group(
+            gracedb.download.si('coinc.xml', preferred_event_id),
+            _download_psd.si(preferred_event_id)
+        ) | _setup_dag_for_rift.s(ini_contents, rundir, superevent_id)
     else:
         print("A PE pipeline named {} does not exist.".format(pe_pipeline))
         raise
