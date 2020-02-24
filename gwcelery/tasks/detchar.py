@@ -12,17 +12,22 @@ References
 .. [LIGO] https://wiki.ligo.org/Calibration/TDCalibReview
 .. [Virgo] https://dcc.ligo.org/G1801125/
 .. [DMT] https://wiki.ligo.org/DetChar/DmtDqVector
+
 """
 import getpass
 import glob
+import io
 import json
 import socket
 import time
 
+from celery import group
 from celery.utils.log import get_task_logger
 from glue.lal import Cache
 from gwdatafind import find_urls
 from gwpy.timeseries import Bits, StateVector, TimeSeries
+from gwpy.plot import Plot
+import matplotlib.pyplot as plt
 import numpy as np
 
 from . import gracedb
@@ -60,6 +65,7 @@ def create_cache(ifo, start, end):
      ...
       <glue.lal.CacheEntry at 0x7fbae6b15080>,
       <glue.lal.CacheEntry at 0x7fbae6b15828>]
+
     """
     pattern = app.conf['llhoft_glob'].format(detector=ifo)
     filenames = glob.glob(pattern)
@@ -87,6 +93,83 @@ def create_cache(ifo, start, end):
         return cache
 
 
+@app.task(shared=False)
+def make_omegascan(ifo, t0, durs):
+    """Helper function to create a single omegascan image, with
+    multiple durations.
+
+    Parameters
+    ----------
+    ifo : str
+        'H1', 'L1', or 'V1'
+    t0 : int or float
+        Central time of the omegascan.
+    durs : list of floats/ints
+        List of three durations which will be scanned symmetrically about t0.
+        Example: [0.5, 2, 10]
+
+    Returns
+    -------
+    bytes or None
+        bytes of png of the omegascan, or None if no omegascan created.
+
+    """
+    # Collect data
+    longest = max(durs)
+    long_start, long_end = t0 - longest, t0 + longest
+    cache = create_cache(ifo, long_start, long_end)
+    strain_name = app.conf['strain_channel_names'][ifo]
+    try:
+        ts = TimeSeries.read(cache, strain_name,
+                             start=long_start, end=long_end).astype('float64')
+        # Do q_transforms for the different durations
+        qgrams = [ts.q_transform(
+            frange=(20, 4096), gps=t0, outseg=(t0 - dur, t0 + dur), logf=True)
+            for dur in durs]
+    except (IndexError, FloatingPointError):
+        # data from cache can't be properly read, or data is weird
+        fig = plt.figure()
+        plt.axis("off")
+        plt.text(0.1, 0.45, f"Failed to create {ifo} omegascan", fontsize=17)
+    else:
+        fig = Plot(*qgrams,
+                   figsize=(10 * len(durs), 5),
+                   geometry=(1, len(durs)),
+                   yscale='log',
+                   method='pcolormesh')
+        for ax in fig.axes:
+            fig.colorbar(ax=ax, label='Normalized energy', clim=(0, 30))
+            ax.set_epoch(t0)
+        fig.suptitle(f'Omegascans of {strain_name} at {t0}', fontweight="bold")
+
+    outfile = io.BytesIO()
+    fig.savefig(outfile, format='png', dpi=300)
+    return outfile.getvalue()
+
+
+@app.task(shared=False)
+def omegascan(t0, graceid):
+    """Create omegascan for a certain event.
+
+    Parameters
+    ----------
+    t0 : float
+        Central event time.
+    graceid : str
+        GraceDB ID to which to upload the omegascan.
+
+    """
+    durs = app.conf['omegascan_durations']
+
+    group(
+        make_omegascan.s(ifo, t0, durs)
+        |
+        gracedb.upload.s(f"{ifo}_omegascan.png", graceid,
+                         f"{ifo} omegascan", tags=['data_quality'])
+        for ifo in ['H1', 'L1', 'V1']
+    ).delay()
+
+
 def generate_table(title, high_bit_list, low_bit_list, unknown_bit_list):
     """Make a nice table which shows the status of the bits checked.
 
@@ -105,6 +188,7 @@ def generate_table(title, high_bit_list, low_bit_list, unknown_bit_list):
     -------
     str
         HTML string of the table.
+
     """
     template = env.get_template('vector_table.jinja2')
     return template.render(title=title, high_bit_list=high_bit_list,
@@ -179,12 +263,13 @@ def check_idq(cache, channel, start, end):
     >>> check_idq(cache, 'H1:IDQ-PGLITCH-OVL-100-1000',
                   1216496260, 1216496262)
     ('H1:IDQ-PGLITCH-OVL-100-1000', 0.87)
+
     """
     if cache:
         try:
             idq_prob = TimeSeries.read(
                 cache, channel, start=start, end=end)
-            return (channel, float(idq_prob.max()))
+            return (channel, float(idq_prob.max().value))
         except RuntimeError:
             log.exception('Failed to read from low-latency iDQ frame files')
     # FIXME: figure out how to get access to low-latency frames outside
@@ -228,6 +313,7 @@ def check_vector(cache, channel, start, end, bits, logic_type='all'):
      'H1:NO_CBC_HW_INJ': True,
      'H1:NO_BURST_HW_INJ': True,
      'H1:NO_DETCHAR_HW_INJ': True}
+
     """
     if logic_type not in ('any', 'all'):
         raise ValueError("logic_type must be either 'all' or 'any'.")
@@ -238,11 +324,18 @@ def check_vector(cache, channel, start, end, bits, logic_type='all'):
         try:
             statevector = StateVector.read(cache, channel,
                                            start=start, end=end, bits=bits)
-            return {bitname.format(channel.split(':')[0], key):
-                    bool(logic_map[logic_type](value.value))
-                    for key, value in statevector.get_bit_series().items()}
         except IndexError:
             log.exception('Failed to read from low-latency frame files')
+        else:
+            # FIXME: In the playground environment, the Virgo state vector
+            # channel is stored as a float. Is this also the case in the
+            # production environment?
+            statevector = statevector.astype(np.uint32)
+            if len(statevector) > 0:  # statevector must not be empty
+                return {bitname.format(channel.split(':')[0], key):
+                        bool(logic_map[logic_type](
+                            value.value if len(value.value) > 0 else None))
+                        for key, value in statevector.get_bit_series().items()}
     # FIXME: figure out how to get access to low-latency frames outside
     # of the cluster. Until we figure that out, actual I/O errors have
     # to be non-fatal.
@@ -290,6 +383,7 @@ def check_vectors(event, graceid, start, end):
     -------
     event : dict
         Details of the event, reflecting any labels that were added.
+
     """
     # Skip MDC events.
     if event.get('search') == 'MDC':
@@ -340,8 +434,8 @@ def check_vectors(event, graceid, start, end):
 
     # Logging iDQ to GraceDB
     if None not in idq_probs.values():
+        idq_probs_readable = {k: round(v, 3) for k, v in idq_probs.items()}
         if max(idq_probs.values()) >= app.conf['idq_pglitch_thresh']:
-            idq_probs_readable = {k: round(v, 3) for k, v in idq_probs.items()}
             idq_msg = ("iDQ glitch probability is high: "
                        "maximum p(glitch) is {}. ").format(
                 json.dumps(idq_probs_readable)[1:-1])
@@ -360,7 +454,7 @@ def check_vectors(event, graceid, start, end):
                        "are good (below {} threshold). "
                        "Maximum p(glitch) is {}. ").format(
                            app.conf['idq_pglitch_thresh'],
-                           json.dumps(idq_probs)[1:-1])
+                           json.dumps(idq_probs_readable)[1:-1])
     else:
         idq_msg = "iDQ glitch probabilities unknown. "
     gracedb.upload.delay(

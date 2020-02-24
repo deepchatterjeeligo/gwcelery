@@ -54,3 +54,31 @@ password should be stored in your `netrc file`_.
 .. _`obtain a robot certificate`: https://robots.ligo.org
 .. _`LVAlert Account Activation`: https://www.lsc-group.phys.uwm.edu/cgi-bin/jabber-acct.cgi
 .. _`netrc file`: https://www.gnu.org/software/inetutils/manual/html_node/The-_002enetrc-file.html
+
+.. _redis-configuration:
+
+Redis
+-----
+
+We recommend that you make the following settings in your Redis server
+configuration file (which is located at :file:`/etc/redis.conf` on most
+systems)::
+
+    # Some GWCelery tasks transfer large payloads through Redis.
+    # The default Redis client bandwidth limits are too small.
+    client-output-buffer-limit normal 0 0 0
+    client-output-buffer-limit slave 256mb 64mb 60
+    client-output-buffer-limit pubsub 256mb 64mb 60
+
+    # If worker nodes are only reachable on a specific network interface,
+    # then make sure to bind any additional IP addresses here.
+    bind 127.0.0.1 10.0.0.1  # replace 10.0.0.1 with address on cluster network
+
+    # Disable RDB snapshots.
+    save ""
+
+    # Enable appendonly snapshots.
+    appendonly yes
+
+If you have to make any changes to your Redis configuration, be sure to restart
+the Redis daemon.

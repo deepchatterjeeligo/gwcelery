@@ -17,7 +17,6 @@ from . import gracedb
 log = get_task_logger(__name__)
 
 
-@app.task(shared=False)
 def pick_coinc():
     """Pick a coincidence from the "First Two Years" paper."""
     filename = pkg_resources.resource_filename(
@@ -110,6 +109,22 @@ def pick_coinc():
     return coinc_xml.getvalue()
 
 
+def _jitter_snr(coinc_bytes):
+    coinc_xml = io.BytesIO(coinc_bytes)
+    xmldoc, _ = utils.load_fileobj(coinc_xml, contenthandler=ContentHandler)
+
+    coinc_inspiral_table = lsctables.CoincInspiralTable.get_table(xmldoc)
+
+    # Add a tiny amount of jitter in SNR so that uploads have random
+    # preferred event precedence.
+    for row in coinc_inspiral_table:
+        row.snr += random.gauss(0, 1e-9)
+
+    coinc_xml = io.BytesIO()
+    utils.write_fileobj(xmldoc, coinc_xml)
+    return coinc_xml.getvalue()
+
+
 @app.task(shared=False)
 def _vet_event(superevents):
     if superevents:
@@ -142,12 +157,12 @@ def upload_event():
     log.info('uploaded as %s', graceid)
 
     if app.conf['mock_events_simulate_multiple_uploads']:
-        num = 50
+        num = 15
         for _ in range(num):
             (
                 gracedb.create_event.s(
-                    coinc, 'MDC', 'gstlal', 'CBC'
-                ).set(countdown=random.uniform(0, num))
+                    _jitter_snr(coinc), 'MDC', 'gstlal', 'CBC'
+                )
                 |
                 _upload_psd.s()
             ).apply_async()
@@ -157,7 +172,7 @@ def upload_event():
         |
         gracedb.get_superevents.si(
             'MDC event: {}'.format(graceid)
-        ).set(countdown=app.conf['orchestrator_timeout'] + 120)
+        ).set(countdown=600)
         |
         _vet_event.s()
     ).apply_async()

@@ -2,7 +2,6 @@ import os
 import json
 from unittest.mock import call, Mock, patch
 
-from ligo.gracedb import rest
 import pkg_resources
 import pytest
 
@@ -15,29 +14,38 @@ from . import resource_json
 
 
 @pytest.mark.parametrize(  # noqa: F811
-    'alert_type,group,pipeline,offline,far,instruments',
-    [['label_added', 'CBC', 'gstlal', False, 1.e-9, ['H1']],
-     ['label_added', 'CBC', 'gstlal', False, 1.e-9, ['H1', 'L1']],
-     ['label_added', 'CBC', 'gstlal', False, 1.e-9, ['H1', 'L1', 'V1']],
-     ['label_added', 'Burst', 'CWB', False, 1.e-9, ['H1', 'L1', 'V1']],
-     ['label_added', 'Burst', 'oLIB', False, 1.e-9, ['H1', 'L1', 'V1']],
-     ['new', 'CBC', 'gstlal', False, 1.e-9, ['H1', 'L1']]])
+    'alert_type,label,group,pipeline,offline,far,instruments',
+    [['label_added', 'ADVREQ', 'CBC', 'gstlal', False, 1.e-9,
+        ['H1']],
+     ['label_added', 'ADVREQ', 'CBC', 'gstlal', False, 1.e-9,
+         ['H1', 'L1']],
+     ['label_added', 'ADVREQ', 'CBC', 'gstlal', False, 1.e-9,
+         ['H1', 'L1', 'V1']],
+     ['label_added', 'ADVREQ', 'Burst', 'CWB', False, 1.e-9,
+         ['H1', 'L1', 'V1']],
+     ['label_added', 'ADVREQ', 'Burst', 'oLIB', False, 1.e-9,
+         ['H1', 'L1', 'V1']],
+     ['label_added', 'GCN_PRELIM_SENT', 'CBC', 'gstlal', False, 1.e-9,
+         ['H1', 'L1', 'V1']],
+     ['new', '', 'CBC', 'gstlal', False, 1.e-9, ['H1', 'L1']]])
 @pytest.mark.xfail(reason='https://github.com/celery/celery/issues/4405')
 def test_handle_superevent(monkeypatch, toy_3d_fits_filecontents,  # noqa: F811
-                           alert_type, group, pipeline, offline,
-                           far, instruments):
+                           alert_type, label, group, pipeline,
+                           offline, far, instruments):
     """Test a superevent is dispatched to the correct annotation task based on
-    its preferred event's search group."""
+    its preferred event's search group.
+    """
     alert = {
         'alert_type': alert_type,
         'uid': 'S1234',
         'object': {
             'superevent_id': 'S1234',
             't_start': 1214714160,
+            't_0': 1214714162,
             't_end': 1214714164,
             'preferred_event': 'G1234'
         },
-        'data': {'name': 'ADVREQ'}
+        'data': {'name': label}
     }
 
     def get_superevent(superevent_id):
@@ -55,7 +63,8 @@ def test_handle_superevent(monkeypatch, toy_3d_fits_filecontents,  # noqa: F811
             'far': far,
             'gpstime': 1234,
             'extra_attributes': {},
-            'labels': ['ADVREQ']
+            'labels': ['ADVREQ', 'PASTRO_READY', 'EMBRIGHT_READY',
+                       'SKYMAP_READY']
         }
         if pipeline == 'gstlal':
             # Simulate subthreshold triggers for gstlal. Subthreshold triggers
@@ -98,6 +107,11 @@ def test_handle_superevent(monkeypatch, toy_3d_fits_filecontents,  # noqa: F811
     create_voevent = Mock(return_value='S1234-1-Preliminary.xml')
     create_label = Mock()
     create_tag = Mock()
+    # FIXME break up preliminary alert pipeline when removing xfail
+    preliminary_alert_pipeline = Mock()
+    select_preferred_event_task = Mock()
+    omegascan = Mock()
+    check_vectors = Mock()
 
     monkeypatch.setattr('gwcelery.tasks.gcn.send.run', send)
     monkeypatch.setattr('gwcelery.tasks.skymaps.plot_allsky.run', plot_allsky)
@@ -122,11 +136,25 @@ def test_handle_superevent(monkeypatch, toy_3d_fits_filecontents,  # noqa: F811
                         start_pe)
     monkeypatch.setattr('gwcelery.tasks.gracedb.create_label._orig_run',
                         create_label)
+    monkeypatch.setattr(
+        'gwcelery.tasks.orchestrator.preliminary_alert.run',
+        preliminary_alert_pipeline
+    )
+    monkeypatch.setattr(
+        'gwcelery.tasks.superevents.select_preferred_event.run',
+        select_preferred_event_task
+    )
+    monkeypatch.setattr('gwcelery.tasks.detchar.omegascan.run', omegascan)
+    monkeypatch.setattr('gwcelery.tasks.detchar.check_vectors.run',
+                        check_vectors)
 
     # Run function under test
     orchestrator.handle_superevent(alert)
 
-    if alert_type == 'label_added':
+    if label == 'GCN_PRELIM_SENT':
+        select_preferred_event_task.assert_called_once()
+        preliminary_alert_pipeline.assert_called_once()
+    elif alert_type == 'label_added':
         plot_allsky.assert_called_once()
         plot_volume.assert_called_once()
 
@@ -148,9 +176,14 @@ def test_handle_superevent(monkeypatch, toy_3d_fits_filecontents,  # noqa: F811
         query_data.assert_called_once()
         prepare_ini.assert_called_once()
         if far <= app.conf['pe_threshold']:
-            start_pe.assert_called_once()
+            assert start_pe.call_count == 2
+            # FIXME with proper arguments with lalinference and bilby
         else:
             start_pe.assert_not_called()
+
+    if alert_type == 'new':
+        omegascan.assert_called_once()
+        check_vectors.assert_called_once()
 
 
 @patch('gwcelery.tasks.gracedb.get_labels', return_value={'DQV', 'ADVREQ'})
@@ -189,6 +222,9 @@ def superevent_initial_alert_download(filename, graceid):
         raise ValueError
 
 
+@pytest.mark.parametrize(  # noqa: F811
+    'labels',
+    [[], ['EM_COINC', 'RAVEN_ALERT']])
 @patch('gwcelery.tasks.gracedb.expose._orig_run', return_value=None)
 @patch('gwcelery.tasks.gracedb.get_log',
        return_value=[{'tag_names': ['sky_loc', 'public'],
@@ -206,17 +242,20 @@ def superevent_initial_alert_download(filename, graceid):
 @patch('gwcelery.tasks.gracedb.download._orig_run',
        superevent_initial_alert_download)
 @patch('gwcelery.tasks.gcn.send.run')
+@patch('gwcelery.tasks.circulars.create_emcoinc_circular.run')
 @patch('gwcelery.tasks.circulars.create_initial_circular.run')
 def test_handle_superevent_initial_alert(mock_create_initial_circular,
+                                         mock_create_emcoinc_circular,
                                          mock_send,
                                          mock_create_voevent,
                                          mock_create_tag, mock_get_log,
-                                         mock_expose):
+                                         mock_expose, labels):
     """Test that the ``ADVOK`` label triggers an initial alert."""
     alert = {
         'alert_type': 'label_added',
         'uid': 'S1234',
-        'data': {'name': 'ADVOK'}
+        'data': {'name': 'ADVOK'},
+        'object': {'labels': labels}
     }
 
     # Run function under test
@@ -225,9 +264,13 @@ def test_handle_superevent_initial_alert(mock_create_initial_circular,
     mock_create_voevent.assert_called_once_with(
         'S1234', 'initial', BBH=0.02, BNS=0.94, NSBH=0.03, ProbHasNS=0.0,
         ProbHasRemnant=0.0, Terrestrial=0.01, internal=False, open_alert=True,
-        skymap_filename='foobar.fits.gz,0', skymap_type='foobar', vetted=True)
+        skymap_filename='foobar.fits.gz,0', skymap_type='foobar',
+        raven_coinc='RAVEN_ALERT' in labels)
     mock_send.assert_called_once_with('contents of S1234-Initial-1.xml')
-    mock_create_initial_circular.assert_called_once_with('S1234')
+    if 'RAVEN_ALERT' in labels:
+        mock_create_emcoinc_circular.assert_called_once_with('S1234')
+    else:
+        mock_create_initial_circular.assert_called_once_with('S1234')
     mock_create_tag.assert_has_calls(
         [call('foobar.fits.gz,0', 'public', 'S1234'),
          call('em_bright.json,0', 'public', 'S1234'),
@@ -267,7 +310,7 @@ def test_handle_superevent_retraction_alert(mock_create_retraction_circular,
     orchestrator.handle_superevent(alert)
 
     mock_create_voevent.assert_called_once_with(
-        'S1234', 'retraction', internal=False, open_alert=True, vetted=True)
+        'S1234', 'retraction', internal=False, open_alert=True)
     mock_send.assert_called_once_with('contents of S1234-Retraction-2.xml')
     mock_create_retraction_circular.assert_called_once_with('S1234')
     mock_create_tag.assert_called_once_with(
@@ -293,10 +336,10 @@ def mock_download(filename, graceid, *args, **kwargs):
                        'SingleInspiral': [{'mass1': 10., 'mass2': 5.}]}})
 @patch('gwcelery.tasks.gracedb.download._orig_run', mock_download)
 @patch('gwcelery.tasks.bayestar.localize.run')
-@patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
-def test_handle_cbc_event(mock_gracedb, mock_localize, mock_get_event):
+def test_handle_cbc_event(mock_localize, mock_get_event):
     """Test that an LVAlert message for a newly uploaded PSD file triggers
-    BAYESTAR."""
+    BAYESTAR.
+    """
     alert = resource_json(__name__, 'data/lvalert_psd.json')
     orchestrator.handle_cbc_event(alert)
     mock_localize.assert_called_once()
@@ -314,6 +357,8 @@ def test_handle_posterior_samples(monkeypatch, alert_type, filename):
     }
 
     download = Mock()
+    em_bright_pe = Mock()
+    _remove_duplicate_meta = Mock()
     skymap_from_samples = Mock()
     fits_header = Mock()
     plot_allsky = Mock()
@@ -321,7 +366,12 @@ def test_handle_posterior_samples(monkeypatch, alert_type, filename):
     upload = Mock()
     flatten = Mock()
 
+    monkeypatch.setattr('gwcelery.tasks.em_bright.em_bright_posterior_'
+                        'samples.run', em_bright_pe)
     monkeypatch.setattr('gwcelery.tasks.gracedb.download._orig_run', download)
+    monkeypatch.setattr(
+        'gwcelery.tasks.orchestrator._remove_duplicate_meta.run',
+        _remove_duplicate_meta)
     monkeypatch.setattr('gwcelery.tasks.skymaps.skymap_from_samples.run',
                         skymap_from_samples)
     monkeypatch.setattr('gwcelery.tasks.skymaps.fits_header.run', fits_header)
@@ -336,12 +386,15 @@ def test_handle_posterior_samples(monkeypatch, alert_type, filename):
 
     if alert['alert_type'] != 'log' or \
             not alert['data']['filename'].endswith('.posterior_samples.hdf5'):
+        _remove_duplicate_meta.assert_not_called()
         skymap_from_samples.assert_not_called()
         fits_header.assert_not_called()
         plot_allsky.assert_not_called()
         annotate_fits_volume.assert_not_called()
         flatten.assert_not_called()
     else:
+        em_bright_pe.assert_called_once()
+        _remove_duplicate_meta.assert_called_once()
         skymap_from_samples.assert_called_once()
         fits_header.assert_called_once()
         plot_allsky.assert_called_once()
@@ -393,8 +446,7 @@ def test_handle_cbc_event_new_event(mock_classifier):
 @patch('gwcelery.tasks.gracedb.download._orig_run', mock_download)
 @patch('gwcelery.tasks.em_bright.classifier_gstlal.run')
 @patch('gwcelery.tasks.bayestar.localize.run')
-@patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
-def test_handle_cbc_event_ignored(mock_gracedb, mock_localize,
+def test_handle_cbc_event_ignored(mock_localize,
                                   mock_classifier,
                                   mock_get_event):
     """Test that unrelated LVAlert messages do not trigger BAYESTAR."""

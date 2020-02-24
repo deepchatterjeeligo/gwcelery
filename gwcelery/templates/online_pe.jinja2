@@ -8,6 +8,19 @@ explanation on jinja is here http://jinja.pocoo.org . #}
 {% set approx = 'IMRPhenomPv2pseudoFourPN' %}
 {% set neff = '1000' %}
 
+{% set Nchain = '10' %}
+{% set Niter = '100000' %}
+{% if mc >= 4.2 %}
+    {% set bayeswave_request_memory = '1000' %}
+    {% set bayeswave_post_request_memory = '4000' %}
+{% else %}
+    {% set bayeswave_request_memory = '16000' %}
+    {% set bayeswave_post_request_memory = '16000' %}
+    {% if mc <= 2.6 %}
+        {% set additional_bayeswave_options = 'bw_srate = 4096' %}
+    {% endif %}
+{% endif %}
+
 {# IMRPhenomPv2_ROQ can not be applied for large massratio #}
 {% if q <= 0.143 %}
     {% set approx = 'SEOBNRv4_ROMpseudoFourPN' %}
@@ -24,26 +37,33 @@ explanation on jinja is here http://jinja.pocoo.org . #}
     {% set margphi = 'margphi=' %}
 {% endif %}
 
-{% if 'playground' in service_url %}
+{% if gracedb_host != 'gracedb.ligo.org' %}
+    {# FIXME: lalinference_pipe fails to read state vector in Virgo's Replay
+    data with gwpy. This issue will be solved by
+    https://git.ligo.org/lscsoft/lalsuite/merge_requests/1110. #}
+    {% set ifos = '["H1", "L1"]' %}
     {% set accounting_group = 'ligo.dev.o3.cbc.pe.lalinference' %}
     {% set engine = 'lalinferencemcmc' %}
     {% set nparallel = '2' %}
     {% set roq = 'True' %}
-    {% set neff = '200' %}
-    {% set disable_spin = 'disable-spin=' %}
+    {% set neff = '100' %}
     {% set zeroLogLike = 'zeroLogLike=' %}
+    {% set Nchain = '1' %}
+    {% set Niter = '100' %}
 {% else %}
-    {% if use_of_ini == 'online' %}
-        {% set queue = 'queue = Online_CBC_PE_Daily' %}
-    {% endif %}
+    {% set ifos = '["H1", "L1", "V1"]' %}
     {% set accounting_group = 'ligo.prod.o3.cbc.pe.lalinference' %}
 {% endif %}
 
+{% if use_of_ini == 'online' %}
+    {% set queue = 'queue = Online_CBC_PE_Daily' %}
+{% endif %}
+
+
 [analysis]
-ifos=['H1', 'L1', 'V1']
+ifos={{ ifos | safe }}
 engine={{ engine }}
 nparallel={{ nparallel }}
-service-url={{ service_url }}
 roq={{ roq }}
 coherence-test=False
 upload-to-gracedb=False
@@ -59,9 +79,8 @@ roq_b_matrix_directory={{ roqdir }}
 
 
 [input]
-max-psd-length=10000
-padding=16
-minimum_realizations_number=8
+max-psd-length=16384
+padding=0
 events=all
 analyse-all-time=False
 timeslides=False
@@ -108,6 +127,8 @@ accounting_group={{ accounting_group  }}
 accounting_group_user=soichiro.morisaki
 {{ queue }}
 
+bayeswave_request_memory={{ bayeswave_request_memory }}
+bayeswavepost_request_memory={{ bayeswave_post_request_memory }}
 
 [datafind]
 url-type=file
@@ -141,7 +162,6 @@ H1-spcal-envelope = {{ h1_calibration }}
 L1-spcal-envelope = {{ l1_calibration }}
 V1-spcal-envelope = {{ v1_calibration }}
 {{ margphi }}
-{{ disable_spin }}
 {{ zeroLogLike }}
 # You can use your own PSDs by specifying their paths.
 # H1-psd=
@@ -221,12 +241,11 @@ label=Online
 
 
 [bayeswave]
-{# FIXME: We should use Bayeswave PSD with the following settings
-in the future.
-Niter=100000
-Nchain=10
-Nbayesline=20000
-#}
+Dmax=200
+Nchain={{ Nchain }}
+Niter={{ Niter }}
+{{ additional_bayeswave_options }}
+
 
 [statevector]
 state-vector-channel={{ state_vector_channels | safe }}

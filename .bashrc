@@ -6,8 +6,11 @@ if [ -f /etc/bashrc ]; then
     . /etc/bashrc
 fi
 
+source /cvmfs/oasis.opensciencegrid.org/ligo/sw/conda/etc/profile.d/conda.sh
+conda activate igwn-py37
+
 # Add user site directory to the PATH. On Linux, this is usuall ~/.local/bin.
-export PATH="$(python3.6 -m site --user-base)/bin${PATH+:${PATH}}"
+export PATH="$(python -m site --user-base)/bin${PATH+:${PATH}}"
 
 # `pip install` should always behave as if it was called with `--user`.
 export PIP_USER=1
@@ -41,5 +44,8 @@ emfollow)
     ;;
 emfollow-playground)
     export CELERY_CONFIG_MODULE="gwcelery.conf.playground"
+    ;;
+emfollow-test)
+    export CELERY_CONFIG_MODULE="gwcelery.conf.test"
     ;;
 esac

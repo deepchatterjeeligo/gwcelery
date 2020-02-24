@@ -1,45 +1,251 @@
 Changelog
 =========
 
-0.8.8 (unreleased)
+0.11.2 (unreleased)
+-------------------
+
+-   Document recommended value for the Redis server setting
+    ``client-output-buffer-limit`` in order to prevent disconnection of Celery
+    workers returning large task results. This value was established early in
+    O3, but since it was not in the documentation, we frequently forgot to set
+    it when configuring a Redis server on a new or upgraded system.
+
+0.11.1 (2020-02-21)
+-------------------
+
+-   Un-pin LALSuite and use the latest stable version (at this time, 6.68).
+
+-   Do not use Online_PE condor slots for lalinference parameter estimation.
+
+0.11.0 (2020-02-21)
+-------------------
+
+-   Use Online_PE condor slots for lalinference parameter estimation.
+
+-   Use Bayeswave PSD for online PE.
+
+-   Fix a bug in skymap generation with online PE posterior samples.
+
+-   Reduce the number of bilby runs for test events to less than once per day.
+
+-   Add systematic error contributions to Fermi-GBM sky maps.
+
+-   Convert Swift-BAT error radii from 90% C.L. to 1-sigma.
+
+-   Add INTEGRAL and AGILE MCAL to GRB pipelines.
+
+-   Apply label ``NOT_GRB`` to external Fermi candidates that do not meet
+    required threshold of a GRB. This is determined by ``Most_Likely_Index``
+    and ``Most_Likely_Prob`` quantities supplied with Fermi notices.
+    RAVEN will not consider external events labeled ``NOT_GRB``.
+
+-   Automatically generate and upload a graphic showing the source property
+    values by means of a bar chart.
+
+-   Pin astropy < 4.0 to work around an issue with caching of downloaded data
+    on the Caltech cluster. See https://github.com/astropy/astropy/issues/9970.
+
+-   Switch from GraceDB REST API calls from gracedb-client to gracedb-sdk to
+    gain increased transaction throughput due to HTTP connection pooling.
+
+-   Remove ``vetted=True`` keyword argument for GraceDB API calls to produce
+    VOEvents, because that argument was removed from the GraceDB server and
+    client over a year ago.
+
+0.10.0 (2020-02-07)
+-------------------
+
+-   Decrease the number of OpenMP workers from 40 to 16, now that gstlal is
+    uploading a reduced number of events.
+
+-   Add VOEvent broker and receiver configuration for playground environment in
+    order to enable end-to-end testing of transmission to and receipt from GCN.
+
+-   Fix a bug in the upload of bilby results.
+
+-   Do not start parameter estimation for mock events uploaded to
+    gracedb.ligo.org.
+
+-   Calculate joint spatio-temporal FAR automatically for external coincidences.
+    Create the combined skymap when both the GW and external skymaps are
+    available.
+
+-   Increase the number of retries, with incremental retry backoff, when fetching
+    the Fermi sky map from HEASARC. This is because the Fermi skymap is typically
+    uploaded tens of minutes after the GCN notice from Fermi.
+
+0.9.2 (2020-01-07)
 ------------------
 
--   Update ligo-followup-advocate version to 1.1.3.
+-   Update to Celery 4.4.0.
 
--   Copy a comment attached to posterior samples into the comment attached to
-    the corresponding skymap.
+-   Add bullet charts for BAYESTAR coherence-versus-incoherence Bayes factors.
+    The BAYESTAR log Bayes factor for coherence versus incoherence is stored in
+    the FITS file header's `LOGBCI` field. For each FITS file that has this
+    header field, make a bullet chart to compare the log Bayes factor to a
+    standard table of threshold confidence levels from Kass & Raftery (1995).
 
--   Add bilby online parameter inference workflow.
+-   Enable the RAVEN alert pipeline by having the superevent manager listen
+    to the label RAVEN_ALERT.
 
--   Fix approximant name used for automatic parameter estimation.
+-   Use RAVEN VOEvent if RAVEN_ALERT.
 
--   Start parameter estimation on mock events.
+-   Generate emcoinc circular if RAVEN_ALERT instead of EM_COINC.
 
--   Add acceptance tests of parameter estimation.
+-   Increase both CBC and Burst trials factors by one due to enabling the
+    RAVEN pipeline.
 
--   Apply EM_COINC to preferred events as well.
+-   Refactor ``gwcelery.tasks.detchar.make_omegascan`` to reuse GWPy's own
+    plotting functions, instead of using our own Matplotlib code. This fixes a
+    bug that prevented ``make_omegascan`` from working with Astropy 4.0 or
+    later.
 
--   Use the Redis server that is provided by the operating system (e.g. as a
-    systemd unit) rather than starting our own Redis server. This prevents a
-    race condition between the shutdown of Redis and the shutdown of the
-    workers that caused the workers to hang on shutdown.
+-   Unpin Astropy version, now that ``make_omegascan`` works with the most
+    recent version.
 
--   Incorporate update circular into flask app.
+0.9.1 (2019-12-15)
+------------------
 
--   Update HTCondor accounting group from O2 to O3.
+-   Produce an ``ADVREQ`` notification as soon as there is an alert which meets
+    the public alert threshold, regardless of whether its annotations are
+    complete. As a result, follow-up advocates will usually receive
+    notifications about 30 seconds earlier, and will receive notifications even
+    if some of the annotations fail.
 
--   Increase throughput for sky localization tasks by offloading processing of
-    the ``openmp`` Celery queue to 40 workers that are launched via HTCondor on
-    specially configured cluster nodes.
+-   Increase the FAR threshold of online PE to the public alert threshold.
 
--   Use mpich as the MPI runtime for parameter estimation.
+-   Update lalsuite to lalsuite==6.63 and unpin scipy.
 
--   Add event completeness to publishability criterion. All three of
-    ``PASTRO_READY``, ``SKYMAP_READY``, and ``EMBRIGHT_READY`` will be used to
-    evaluate event completeness for CBC events. Only the ``SKYMAP_READY`` label
-    will be used to evaluate completeness for burst events.
+-   Change RAVEN to grab sky map from superevent. Block joint FAR calculation
+    for SNEWS coincidences.
 
--   Revert back to running BAYESTAR for all ``G`` events.
+-   Skip Virgo data when online PE is started on O2Replay data since its
+    statevector cannot be read by gwpy.
+
+-   Modify RAVEN to run on MDC events.
+
+-   Restrict the ``superevents.process`` task to process only complete
+    G events instead of running for all the superevent completeness labels.
+    The behavior for running on the ``new`` type events remains unchanged.
+
+0.9.0 (2019-11-23)
+------------------
+
+This is the initial release of GWCelery for O3b.
+
+-   Changes related to configuration settings
+
+    - Use the Redis server that is provided by the operating system (e.g. as a
+      systemd unit) rather than starting our own Redis server. This prevents a
+      race condition between the shutdown of Redis and the shutdown of the
+      workers that caused the workers to hang on shutdown.
+
+    - Update HTCondor accounting group from O2 to O3.
+
+    - Increase throughput for sky localization tasks by offloading processing
+      of the ``openmp`` Celery queue to 40 workers that are launched via
+      HTCondor on specially configured cluster nodes.
+
+    - Use mpich as the MPI runtime for parameter estimation.
+
+    - Use different HTCondor accounting groups for Celery workers depending on
+      whether GWCelery is running in the playground environment
+      (``ligo.dev.o3.cbc.pe.bayestar``) or the production environment
+      (``ligo.prod.o3.cbc.pe.bayestar``).
+
+    - Drop support for Python 3.6 so that we can use the ``check_output`` keyword
+      argument that was added to ``suprocess.run()`` in Python 3.7.
+
+    - Pin gwpy to <= 0.15.0 since the updated gwpy fails to read Virgo's state
+      vector.
+
+    - Update ligo-followup-advocate version to 1.1.3.
+
+-   Changes related to superevent/orchestrator design
+
+    - Add event completeness to publishability criterion. All three of
+      ``PASTRO_READY``, ``SKYMAP_READY``, and ``EMBRIGHT_READY`` will be used
+      to evaluate event completeness for CBC events. Only the ``SKYMAP_READY``
+      label will be used to evaluate completeness for burst events.
+
+    - Use ``EM_Selected`` to freeze the preferred event of a superevent and
+      launch a preliminary alert.
+
+    - Make sub-threshold annotations independent of annotations for superevents
+      which pass public alert threshold.
+
+    - Prevent second preliminary to be sent in the event of any advocate action.
+      Previously, this was only being prevented for ADVNO.
+
+    - Make skymaps from parameter estimation public automatically.
+
+-   Changes related to online parameter estimation
+
+    - Move a comment attached to posterior samples to
+      the corresponding skymap.
+
+    - Add bilby online parameter inference workflow.
+
+    - Fix approximant name used for automatic parameter estimation.
+
+    - Start parameter estimation on mock events.
+
+    - Add acceptance tests of parameter estimation.
+
+    - Use nodes dedicated to online PE also for playground events so that the
+      test runs do not get stuck due to the lack of resources.
+
+    - Add spins in online PE on playground events so that embright probabilities
+      are calculated based on the posterior samples without errors.
+
+    - Remove skymap generation from PE DAG so that it will not be generated
+      twice.
+
+    - Notify which pe pipeline failed for the failure of pe condor jobs.
+
+-   Changes related to external coincidences
+
+    - Create RAVEN circular if EM_COINC label is applied to superevent.
+
+    - Make coincidence FAR synchronous within RAVEN pipeline to fix race
+      condition.
+
+    - Remove redundant SNEWS handler key.
+
+    - Remove generation of em_coinc circular when ``EM_COINC`` label is
+      applied.
+
+    - Apply EM_COINC to preferred event when coincidence passes RAVEN publishing
+      conditions.
+
+    - Attempt fetching and uploading Fermi skymap upon receinving GCN notice.
+
+-   Changes related to skymap generation
+
+    - Revert back to running BAYESTAR for all ``G`` events.
+
+    - Pass the ``-j`` flag to ``ligo-skymap-from-samples`` to speed up skymap
+      generation.
+
+-   Changes related to automated data quality checks
+
+    - Create omegascans for all detectors upon creation of new superevent.
+
+    - Run ``check_vectors`` upon the creation of a superevent. This will
+      allow subthreshold superevents to be annotated with ``DQOK`` or
+      ``DQV`` label.
+
+-   Changes to the Flask dashboard
+
+    - Teach preliminary alert form in Flask dashboard to present a dropdown of
+      events sorted by the preferred event criterion.
+
+    - Incorporate update circular into flask app.
+
+-   Other changes
+
+    - Add a task to ``em_bright.py`` to compute and upload source properties
+      upon the upload of ``LALInference.posterior_samples.hdf5``.
 
 0.8.7 (2019-09-14)
 ------------------

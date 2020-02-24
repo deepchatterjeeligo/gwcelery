@@ -14,13 +14,21 @@ from . import gracedb, lvalert
 
 log = get_task_logger(__name__)
 
-required_labels_by_group = {
+REQUIRED_LABELS_BY_GROUP = {
     'cbc': {'PASTRO_READY', 'EMBRIGHT_READY', 'SKYMAP_READY'},
     'burst': {'SKYMAP_READY'}
 }
 """These labels should be present on an event to consider it to
 be complete.
 """
+
+FROZEN_LABEL = 'EM_Selected'
+"""This label indicates that the superevent manager should make no further
+changes to the preferred event."""
+
+READY_LABEL = 'EM_READY'
+"""This label indicates that a preferred event has been assigned and it
+has all data products required to make it ready for annotations."""
 
 
 @lvalert.handler('cbc_gstlal',
@@ -31,131 +39,168 @@ be complete.
                  'burst_cwb',
                  shared=False)
 def handle(payload):
-    """Respond to lvalert nodes from low-latency search
-    pipelines and delegate to :meth:`process` for
-    superevent management.
+    """Respond to lvalert nodes from low-latency search pipelines and delegate
+    to :meth:`process` for superevent management.
     """
     alert_type = payload['alert_type']
-    if alert_type not in ['new', 'label_added']:
-        return
-
     gid = payload['object']['graceid']
 
     try:
         far = payload['object']['far']
     except KeyError:
-        log.info(
-            'Skipping %s because LVAlert message does not provide FAR', gid)
+        log.info('Skipping %s because it lacks a FAR', gid)
         return
-    else:
-        if far > app.conf['superevent_far_threshold']:
-            log.info("Skipping processing of %s because of high FAR", gid)
+
+    if far > app.conf['superevent_far_threshold']:
+        log.info("Skipping processing of %s because of high FAR", gid)
+        return
+
+    if alert_type == 'label_added':
+        label = payload['data']['name']
+        group = payload['object']['group'].lower()
+        if label == 'RAVEN_ALERT':
+            log.info('Label %s added to %s', label, gid)
+        elif label not in REQUIRED_LABELS_BY_GROUP[group]:
             return
-    group = payload['object']['group'].lower()
-    required_labels = required_labels_by_group[group]
-    if alert_type == 'new' or (alert_type == 'label_added' and
-                               payload['data']['name'] in required_labels):
-        process.delay(payload)
-    elif alert_type == 'label_added' and payload['data']['name'] == 'EM_COINC':
-        log.info('Label %s added to %s' % (payload['data']['name'], gid))
-        # raven preliminary
-        raise NotImplementedError
+        elif not is_complete(payload['object']):
+            log.info("Ignoring since %s has %s labels. "
+                     "It is not complete" % (gid, payload['object']['labels']))
+            return
+    elif alert_type != 'new':
+        return
+
+    process.delay(payload)
 
 
 @gracedb.task(queue='superevent', shared=False)
 @gracedb.catch_retryable_http_errors
 def process(payload):
     """
-    Respond to `payload` and serially processes them
-    to create new superevents, add events to existing ones
+    Respond to `payload` and serially processes them to create new superevents,
+    add events to existing ones.
 
     Parameters
     ----------
     payload : dict
         LVAlert payload
+
     """
     event_info = payload['object']
     gid = event_info['graceid']
-
-    if event_info.get('search') == 'MDC':
-        category = 'mdc'
-    elif event_info['group'] == 'Test':
-        category = 'test'
-    else:
-        category = 'production'
+    category = get_category(event_info)
+    t_0, t_start, t_end = get_ts(event_info)
 
     if event_info.get('superevent'):
-        # superevent already exists; label_added LVAlert
-        s = gracedb.get_superevent(event_info['superevent'])
+        sid = event_info['superevent']
+        log.info('Event %s already belongs to superevent %s', gid, sid)
+        s = gracedb.get_superevent(sid)
         superevent = _SuperEvent(s['t_start'],
                                  s['t_end'],
                                  s['t_0'],
                                  s['superevent_id'],
                                  s['preferred_event'], s)
-        # no change in superevent times for label_added LVAlert
-        _update_superevent(superevent,
-                           event_info,
-                           t_0=None,
-                           t_start=None,
-                           t_end=None)
-        return
-
-    superevents = gracedb.get_superevents('category: {} {} .. {}'.format(
-        category,
-        event_info['gpstime'] - app.conf['superevent_query_d_t_start'],
-        event_info['gpstime'] + app.conf['superevent_query_d_t_end']))
-
-    for superevent in superevents:
-        if gid in superevent['gw_events']:
-            sid = superevent['superevent_id']
-            break  # Found matching superevent
-    else:
-        sid = None  # No matching superevent
-
-    t_0, t_start, t_end = get_ts(event_info)
-
-    if sid is None:
-        event_segment = _Event(event_info['gpstime'],
-                               t_start, t_end,
-                               event_info['graceid'],
-                               event_info['group'],
-                               event_info['pipeline'],
-                               event_info.get('search'),
-                               event_dict=event_info)
-
-        superevent = _partially_intersects(superevents, event_segment)
-
-        if not superevent:
-            log.info('New event %s with no superevent in GraceDB, '
-                     'creating new superevent', gid)
-            gracedb.create_superevent(event_info['graceid'],
-                                      t_0, t_start, t_end, category)
-            return
-
-        log.info('Event %s in window of %s. Adding event to superevent',
-                 gid, superevent.superevent_id)
-        gracedb.add_event_to_superevent(superevent.superevent_id,
-                                        event_segment.gid)
-        # extend the time window of the superevent
-        new_superevent = superevent | event_segment
-        if new_superevent != superevent:
-            log.info("%s not completely contained in %s, "
-                     "extending superevent window",
-                     event_segment.gid, superevent.superevent_id)
-            new_t_start, new_t_end = new_superevent[0], new_superevent[1]
-
-        else:
-            log.info("%s is completely contained in %s",
-                     event_segment.gid, superevent.superevent_id)
-            new_t_start = new_t_end = None
         _update_superevent(superevent,
                            event_info,
                            t_0=t_0,
-                           t_start=new_t_start,
-                           t_end=new_t_end)
+                           t_start=None,
+                           t_end=None)
+    else:  # not event_info.get('superevent')
+        log.info('Event %s does not yet belong to a superevent', gid)
+        superevents = gracedb.get_superevents('category: {} {} .. {}'.format(
+            category,
+            event_info['gpstime'] - app.conf['superevent_query_d_t_start'],
+            event_info['gpstime'] + app.conf['superevent_query_d_t_end']))
+
+        for s in superevents:
+            if gid in s['gw_events']:
+                sid = s['superevent_id']
+                log.info('Event %s found assigned to superevent %s', gid, sid)
+                if payload['alert_type'] == 'label_added':
+                    log.info('Label %s added to %s',
+                             payload['data']['name'], gid)
+                elif payload['alert_type'] == 'new':
+                    log.info('New type LVAlert for %s with '
+                             'existing superevent %s. '
+                             'No action required' % (gid, sid))
+                    return
+                superevent = _SuperEvent(s['t_start'],
+                                         s['t_end'],
+                                         s['t_0'],
+                                         s['superevent_id'],
+                                         s['preferred_event'], s)
+                _update_superevent(superevent,
+                                   event_info,
+                                   t_0=t_0,
+                                   t_start=None,
+                                   t_end=None)
+                break
+        else:  # s not in superevents
+            event_segment = _Event(t_0, t_start, t_end,
+                                   event_info['graceid'],
+                                   event_info['group'],
+                                   event_info['pipeline'],
+                                   event_info.get('search'),
+                                   event_dict=event_info)
+
+            superevent = _partially_intersects(superevents, event_segment)
+
+            if superevent:
+                sid = superevent.superevent_id
+                log.info('Event %s in window of %s. '
+                         'Adding event to superevent', gid, sid)
+                gracedb.add_event_to_superevent(sid, event_segment.gid)
+                # extend the time window of the superevent
+                new_superevent = superevent | event_segment
+                if new_superevent != superevent:
+                    log.info("%s not completely contained in %s, "
+                             "extending superevent window",
+                             event_segment.gid, sid)
+                    new_t_start, new_t_end = new_superevent
+
+                else:  # new_superevent == superevent
+                    log.info("%s is completely contained in %s",
+                             event_segment.gid, sid)
+                    new_t_start = new_t_end = None
+                _update_superevent(superevent,
+                                   event_info,
+                                   t_0=t_0,
+                                   t_start=new_t_start,
+                                   t_end=new_t_end)
+            else:  # not superevent
+                log.info('New event %s with no superevent in GraceDB, '
+                         'creating new superevent', gid)
+                sid = gracedb.create_superevent(event_info['graceid'],
+                                                t_0, t_start, t_end)
+
+    if should_publish(event_info):
+        gracedb.create_label.delay('ADVREQ', sid)
+        if is_complete(event_info):
+            gracedb.create_label.s(FROZEN_LABEL, sid).set(
+                queue='superevent',
+                countdown=app.conf['preliminary_alert_timeout']
+            ).delay()
+
+
+def get_category(event):
+    """Get the superevent category for an event.
+
+    Parameters
+    ----------
+    event : dict
+        Event dictionary (e.g., the return value from
+        :meth:`gwcelery.tasks.gracedb.get_event`).
+
+    Returns
+    -------
+    {'mdc', 'test', 'production'}
+
+    """
+    if event.get('search') == 'MDC':
+        return 'mdc'
+    elif event['group'] == 'Test':
+        return 'test'
     else:
-        log.critical('Superevent %s exists for alert_type new for %s',
-                     sid, gid)
+        return 'production'
 
 
 def get_ts(event):
@@ -166,7 +211,7 @@ def get_ts(event):
         ``frequency_mean`` fields.
     *   For all other pipelines, use the
         :obj:`~gwcelery.conf.superevent_d_t_start` and
-        :obj:`~gwcelery.conf.superevent_d_t_start` configuration values.
+        :obj:`~gwcelery.conf.superevent_d_t_end` configuration values.
 
     Parameters
     ----------
@@ -183,6 +228,7 @@ def get_ts(event):
 
     t_end : float
         Segment end time in GPS seconds.
+
     """
     pipeline = event['pipeline'].lower()
     if pipeline == 'cwb':
@@ -216,6 +262,7 @@ def get_snr(event):
     -------
     snr : float
         The SNR.
+
     """
     group = event['group'].lower()
     pipeline = event['pipeline'].lower()
@@ -276,14 +323,34 @@ def get_instruments_in_ranking_statistic(event):
     candidate. For such pipelines, we infer which pipelines contributed to the
     ranking by counting only the SingleInspiral records for which the chi
     squared field is non-empty.
+
+    For PyCBC Live in the O3 configuration, an empty chi^2 field does not mean
+    that the detector did not contribute to the ranking; in fact, *all*
+    detectors listed in the SingleInspiral table contribute to the significance
+    even if the chi^2 is not computed for some of them. Hence PyCBC Live is
+    handled as a special case.
+
     """
-    try:
+    if event['pipeline'].lower() == 'pycbc':
+        return set(event['instruments'].split(','))
+    else:
         attribs = event['extra_attributes']['SingleInspiral']
-        ifos = {single['ifo'] for single in attribs
+        return {single['ifo'] for single in attribs
                 if single.get('chisq') is not None}
-    except KeyError:
-        ifos = set(event['instruments'].split(','))
-    return ifos
+
+
+@app.task(shared=False)
+def select_preferred_event(events):
+    """Select the preferred event out of a list of events, typically contents
+    of a superevent, based on :meth:`keyfunc`.
+
+    Parameters
+    ----------
+    events : list
+        list of event dictionaries
+
+    """
+    return max(events, key=keyfunc)
 
 
 def is_complete(event):
@@ -299,10 +366,11 @@ def is_complete(event):
     event : dict
         Event dictionary (e.g., the return value from
         :meth:`gwcelery.tasks.gracedb.get_event`).
+
     """
     group = event['group'].lower()
     label_set = set(event['labels'])
-    required_labels = required_labels_by_group[group]
+    required_labels = REQUIRED_LABELS_BY_GROUP[group]
     return required_labels.issubset(label_set)
 
 
@@ -312,7 +380,6 @@ def should_publish(event):
     All of the following conditions must be true for a public alert:
 
     *   The event's ``offline`` flag is not set.
-    *   The event should be complete based on :meth:`is_complete`.
     *   The event's false alarm rate, weighted by the group-specific trials
         factor as specified by the
         :obj:`~gwcelery.conf.preliminary_alert_trials_factor` configuration
@@ -330,19 +397,22 @@ def should_publish(event):
     should_publish : bool
         :obj:`True` if the event meets the criteria for a public alert or
         :obj:`False` if it does not.
+
     """
     return all(_should_publish(event))
 
 
 def _should_publish(event):
-    """Wrapper around :meth:`should_publish`. Returns the boolean returns
-    of the publishability criteria as a tuple for later use.
+    """Wrapper around :meth:`should_publish`. Returns the boolean returns of
+    the publishability criteria as a tuple for later use.
     """
     group = event['group'].lower()
     trials_factor = app.conf['preliminary_alert_trials_factor'][group]
     far_threshold = app.conf['preliminary_alert_far_threshold'][group]
     far = trials_factor * event['far']
-    return not event['offline'], far <= far_threshold, is_complete(event)
+    raven_coincidence = ('RAVEN_ALERT' in event['labels'])
+
+    return not event['offline'], (far <= far_threshold or raven_coincidence)
 
 
 def keyfunc(event):
@@ -350,7 +420,7 @@ def keyfunc(event):
 
     Return a value suitable for identifying the preferred event. Given events
     ``a`` and ``b``, ``a`` is preferred over ``b`` if
-    ``keyfunc(a) < keyfunc(b)``, else ``b`` is preferred.
+    ``keyfunc(a) > keyfunc(b)``, else ``b`` is preferred.
 
     Parameters
     ----------
@@ -367,29 +437,32 @@ def keyfunc(event):
     -----
     Tuples are compared lexicographically in Python: they are compared
     element-wise until an unequal pair of elements is found.
+
     """
     group = event['group'].lower()
     try:
-        group_rank = ['cbc', 'burst'].index(group)
+        group_rank = ['burst', 'cbc'].index(group)
     except ValueError:
-        group_rank = float('inf')
+        group_rank = -1
 
     if group == 'cbc':
-        ifo_rank = -len(get_instruments(event))
-        tie_breaker = -get_snr(event)
+        group_rank = 1
+        n_ifos = len(get_instruments(event))
+        significance = get_snr(event)
     else:
-        ifo_rank = 0
-        tie_breaker = event['far']
-    # publishability criteria followed by group rank, ifo rank and tie breaker
-    res_keyfunc = list(not ii for ii in _should_publish(event))
-    res_keyfunc.extend((group_rank, ifo_rank, tie_breaker))
-    return tuple(res_keyfunc)
+        # We don't care about the number of detectors for burst events.
+        n_ifos = -1
+        # Smaller FAR -> higher IFAR -> more significant.
+        # Use -FAR instead of IFAR=1/FAR so that rank for FAR=0 is defined.
+        significance = -event['far']
+
+    return (is_complete(event), *_should_publish(event), group_rank, n_ifos,
+            significance)
 
 
 def _update_superevent(superevent, new_event_dict,
                        t_0, t_start, t_end):
-    """
-    Update preferred event and/or change time window. Events with multiple
+    """Update preferred event and/or change time window. Events with multiple
     detectors take precedence over single-detector events, then CBC events take
     precedence over burst events, and any remaining tie is broken by SNR/FAR
     values for CBC/Burst. Single detector are not promoted to preferred event
@@ -407,22 +480,29 @@ def _update_superevent(superevent, new_event_dict,
         start time of `superevent_id`, None for no change
     t_end : float
         end time of `superevent_id`, None for no change
+
     """
     superevent_id = superevent.superevent_id
     preferred_event = superevent.preferred_event
-    preferred_event_dict = gracedb.get_event(preferred_event)
 
     kwargs = {}
     if t_start is not None:
         kwargs['t_start'] = t_start
     if t_end is not None:
         kwargs['t_end'] = t_end
-    if keyfunc(new_event_dict) < keyfunc(preferred_event_dict):
-        kwargs['t_0'] = t_0
-        kwargs['preferred_event'] = new_event_dict['graceid']
+    if FROZEN_LABEL not in superevent.event_dict['labels']:
+        preferred_event_dict = gracedb.get_event(preferred_event)
+        if keyfunc(new_event_dict) > keyfunc(preferred_event_dict):
+            # update preferred event when EM_Selected is not applied
+            kwargs['t_0'] = t_0
+            kwargs['preferred_event'] = new_event_dict['graceid']
 
     if kwargs:
         gracedb.update_superevent(superevent_id, **kwargs)
+    # completeness takes first precedence in deciding preferred event
+    # necessary and suffiecient condition to superevent as ready
+    if is_complete(new_event_dict):
+        gracedb.create_label.delay(READY_LABEL, superevent_id)
 
 
 def _superevent_segment_list(superevents):
@@ -439,6 +519,7 @@ def _superevent_segment_list(superevents):
     -------
     superevent_list : segmentlist
         superevents as a segmentlist object
+
     """
     return segmentlist([_SuperEvent(s.get('t_start'),
                         s.get('t_end'),
@@ -466,6 +547,7 @@ def _partially_intersects(superevents, event_segment):
     -------
     match_segment   : segment
         segment in `self` which intersects. `None` if not found
+
     """
     # create a segmentlist using start and end times
     superevents = _superevent_segment_list(superevents)
@@ -477,6 +559,7 @@ def _partially_intersects(superevents, event_segment):
 
 class _Event(segment):
     """An event implemented as an extension of :class:`segment`."""
+
     def __new__(cls, t0, t_start, t_end, *args, **kwargs):
         return super().__new__(cls, t_start, t_end)
 
@@ -492,6 +575,7 @@ class _Event(segment):
 
 class _SuperEvent(segment):
     """An superevent implemented as an extension of :class:`segment`."""
+
     def __new__(cls, t_start, t_end, *args, **kwargs):
         return super().__new__(cls, t_start, t_end)
 

@@ -1,7 +1,13 @@
-"""Application configuration for ``gracedb.ligo.org``. Inherits all settings
-from :mod:`gwcelery.conf.playground`, with the exceptions below."""
+"""Application configuration for ``gracedb.ligo.org``.
+
+Inherits all settings from :mod:`gwcelery.conf.playground`, with the exceptions
+below.
+"""
 
 from . import *  # noqa: F401, F403
+
+condor_accounting_group = 'ligo.prod.o3.cbc.pe.bayestar'
+"""HTCondor accounting group for Celery workers launched with condor_submit."""
 
 expose_to_public = True
 """Set to True if events meeting the public alert threshold really should be
@@ -53,5 +59,5 @@ strain_channel_names = {'H1': 'H1:GDS-CALIB_STRAIN_CLEAN',
 
 sentry_environment = 'production'
 """Record this `environment tag
-<https://docs.sentry.io/enriching-error-data/environments/>`)` in Sentry log
+<https://docs.sentry.io/enriching-error-data/environments/>`_ in Sentry log
 messages."""

@@ -19,10 +19,10 @@ import os
 
 # Celery application settings.
 
-# Task tombstones expire after 5 minutes.
+# Task tombstones expire after 2 hours.
 # Celery's default setting of 1 day could cause the Redis database to grow too
 # large because we pass large byte strings as task arguments and return values.
-result_expires = 300
+result_expires = 7200
 
 # Use pickle serializer, because it supports byte values.
 accept_content = ['json', 'pickle']
@@ -37,6 +37,9 @@ task_queue_max_priority = 1
 priority_steps = list(range(task_queue_max_priority + 1))
 
 # GWCelery-specific settings.
+
+condor_accounting_group = 'ligo.dev.o3.cbc.pe.bayestar'
+"""HTCondor accounting group for Celery workers launched with condor_submit."""
 
 expose_to_public = False
 """Set to True if events meeting the public alert threshold really should be
@@ -62,6 +65,9 @@ voevent_receiver_address = '68.169.57.253:8099'
 options, see `GCN's list of available VOEvent servers
 <https://gcn.gsfc.nasa.gov/voevent.html#tc2>`_. If this is an empty string,
 then completely disable the GCN listener."""
+
+email_host = 'imap.gmail.com'
+"""IMAP hostname to receive the GCN e-mail notice formats."""
 
 superevent_d_t_start = {'gstlal': 1.0,
                         'spiir': 1.0,
@@ -92,24 +98,37 @@ superevent_default_d_t_end = 1.0
 superevent_far_threshold = 1 / 3600
 """Maximum false alarm rate to consider events superevents."""
 
+preliminary_alert_timeout = 30.
+"""Wait this many seconds for the preferred event to stabilize before issuing a
+preliminary alert."""
+
 preliminary_alert_far_threshold = {'cbc': 1 / (60 * 86400),
                                    'burst': 1 / (365 * 86400),
                                    'test': 1 / (30 * 86400)}
 """Group specific maximum false alarm rate to consider
 sending preliminary alerts."""
 
-preliminary_alert_trials_factor = dict(cbc=4.0, burst=3.0)
+preliminary_alert_trials_factor = dict(cbc=5.0, burst=4.0)
 """Trials factor corresponding to trigger categories. For CBC and Burst, trials
 factor is the number of pipelines. CBC pipelines are gstlal, pycbc, mbtaonline
 and spiir. Burst searches are cwb.allsky, cwb.bbh and cwb.imbh."""
 
-orchestrator_timeout = 300.0
-"""The orchestrator will wait this many seconds from the time of the
-creation of a new superevent to the time that annotations begin, in order
-to let the superevent manager's decision on the preferred event
-stabilize."""
+snews_gw_far_threshold = 1 / (3600 * 24)
+"""Maximum false alarm rate for a superevent to send out a coincidence alert
+between an external SNEWS alert and the superevent."""
 
-pe_timeout = orchestrator_timeout + 45.0
+superevent_clean_up_timeout = 270.
+"""The orchestrator will wait this many seconds from the time of the
+application of the GCN_PRELIM_SENT label to revise the preferred
+event out of the accumulated events."""
+
+subthreshold_annotation_timeout = 300.
+"""The orchestrator will wait this many seconds from the time of the
+creation of a new superevent to the time that subthreshold superevents
+are annotated. It is expected that the timeout is long enough such
+that there are no more G events being added to the superevent."""
+
+pe_timeout = 345.0
 """The orchestrator will wait this many seconds from the time of the
 creation of a new superevent to the time that parameter estimation begins, in
 case the preferred event is updated with high latency."""
@@ -118,12 +137,14 @@ check_vector_prepost = {'gstlal': [2, 2],
                         'spiir': [2, 2],
                         'pycbc': [2, 2],
                         'MBTAOnline': [2, 2],
-                        'oLIB': [0.5, 0.5],
-                        'LIB': [0.5, 0.5],
-                        'CWB': [0.5, 0.5],
+                        'oLIB': [1.5, 1.5],
+                        'LIB': [1.5, 1.5],
+                        'CWB': [1.5, 1.5],
                         'HardwareInjection': [2, 2],
                         'Swift': [2, 2],
                         'Fermi': [2, 2],
+                        'INTEGRAL': [2, 2],
+                        'AGILE': [2, 2],
                         'SNEWS': [10, 10]}
 """Seconds before and after the superevent start and end times which the DQ
 vector check will include in its check. Pipeline dependent."""
@@ -138,6 +159,8 @@ uses_gatedhoft = {'gstlal': True,
                   'HardwareInjection': False,
                   'Swift': False,
                   'Fermi': False,
+                  'INTEGRAL': False,
+                  'AGILE': False,
                   'SNEWS': False}
 """Whether or not a pipeline uses gated h(t). Determines whether or not
 the DMT-DQ_VECTOR will be analyzed for data quality."""
@@ -175,6 +198,8 @@ idq_veto = {'gstlal': False,
             'HardwareInjection': False,
             'Swift': False,
             'Fermi': False,
+            'INTEGRAL': False,
+            'AGILE': False,
             'SNEWS': False}
 """If true for a pipeline, iDQ values above the threshold defined in
 :obj:`~gwcelery.conf.idq_pglitch.thres` will cause DQV to be labeled.
@@ -201,7 +226,8 @@ strain_channel_names = {'H1': 'H1:GDS-CALIB_STRAIN_O2Replay',
                         'L1': 'L1:GDS-CALIB_STRAIN_O2Replay',
                         'V1': 'V1:Hrec_hoft_16384Hz_O2Replay'}
 """Names of h(t) channels used in Parameter Estimation (see
-:mod:`gwcelery.tasks.inference`)"""
+:mod:`gwcelery.tasks.inference`) and in detchar omegascan creation
+(see :mod:`gwcelery.tasks.detchar`)."""
 
 state_vector_channel_names = {'H1': 'H1:GDS-CALIB_STATE_VECTOR',
                               'L1': 'L1:GDS-CALIB_STATE_VECTOR',
@@ -264,9 +290,8 @@ detchar_bit_definitions = {
 }
 """Bit definitions for detchar checks"""
 
-pe_threshold = 1.0 / (28 * 86400)
-"""FAR threshold in Hz for Parameter Estimation. PE group now applies
-1/(4 weeks) as a threshold. 86400 seconds = 1 day and 28 days = 4 weeks."""
+omegascan_durations = [0.5, 2.0, 10.0]
+"""Durations for omegascans, symmetric about t0"""
 
 pe_results_path = os.path.join(os.getenv('HOME'), 'public_html/online_pe')
 """Path to the results of Parameter Estimation (see

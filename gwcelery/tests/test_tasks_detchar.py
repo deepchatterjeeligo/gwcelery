@@ -1,7 +1,10 @@
+from io import BytesIO
 import logging
 from unittest.mock import call, patch
 
 from gwpy.timeseries import Bits
+import matplotlib.pyplot as plt
+import numpy as np
 from pkg_resources import resource_filename
 import pytest
 
@@ -63,6 +66,14 @@ def gatedpipe_prepost():
     app.conf['check_vector_prepost'] = old
 
 
+@pytest.fixture
+def scan_strainname():
+    old = app.conf['strain_channel_names']
+    app.conf['strain_channel_names'] = {'H1': 'H1:GWOSC-16KHZ_R1_STRAIN'}
+    yield
+    app.conf['strain_channel_names'] = old
+
+
 def test_create_cache(llhoft_glob_fail):
     assert len(detchar.create_cache('L1', 1216577976, 1216577979)) == 1
 
@@ -72,6 +83,41 @@ def test_create_cache_old_data(mock_find, llhoft_glob_fail):
     start, end = 1198800018, 1198800028
     detchar.create_cache('L1', start, end)
     mock_find.assert_called()
+
+
+@patch('gwcelery.tasks.detchar.create_cache', return_value=[resource_filename(
+    __name__, 'data/llhoft/omegascan/scanme.gwf')])
+def test_make_omegascan_worked(mock_create_cache, scan_strainname):
+    durs = [1, 1, 1]
+    t0 = 1126259463
+    png = detchar.make_omegascan('H1', t0, durs)
+    pngarray = plt.imread(BytesIO(png))
+    # Test to see that the png is taller than 1400 pixels, indicating
+    # presence of omegascan(s)
+    assert plt.imshow(pngarray).get_extent()[2] > 1400
+
+
+@patch('gwcelery.tasks.detchar.create_cache', return_value=[])
+def test_make_omegascan_failed(mock_create_cache, scan_strainname):
+    durs = [1, 1, 1]
+    t0 = 1126259463
+    png = detchar.make_omegascan('H1', t0, durs)
+    pngarray = plt.imread(BytesIO(png))
+    # Test to see that the png is shorter than 1500 pixels
+    assert plt.imshow(pngarray).get_extent()[2] < 1500
+
+
+@patch('gwcelery.tasks.detchar.make_omegascan.run',
+       return_value=BytesIO().getvalue())
+@patch('gwcelery.tasks.gracedb.upload.run')
+def test_omegascan(mock_upload, mock_fig):
+    t0 = 1126259463
+    gid = "S1234"
+    detchar.omegascan(t0, gid)
+    mock_upload.assert_called_with(
+        mock_fig(), "V1_omegascan.png", gid, "V1 omegascan",
+        tags=['data_quality']
+    )
 
 
 def test_check_idq(llhoft_glob_pass):
@@ -129,6 +175,21 @@ def test_check_vector(llhoft_glob_pass):
         'H1:NO_DMT-ETMY_ESD_DAC_OVERFLOW': True}
 
 
+@patch('gwcelery.tasks.detchar.StateVector.read', return_value=np.asarray([]))
+def test_check_vector_fails_on_empty(mock_statevector, llhoft_glob_pass):
+    channel = 'H1:DMT-DQ_VECTOR'
+    start, end = 1216577976, 1216577980
+    cache = detchar.create_cache('H1', start, end)
+    bit_defs = {channel_type: Bits(channel=bitdef['channel'],
+                                   bits=bitdef['bits'])
+                for channel_type, bitdef
+                in app.conf['detchar_bit_definitions'].items()}
+    assert detchar.check_vector(cache, channel, start, end,
+                                bit_defs['dmt_dq_vector_bits']) == {
+        'H1:NO_OMC_DCPD_ADC_OVERFLOW': None,
+        'H1:NO_DMT-ETMY_ESD_DAC_OVERFLOW': None}
+
+
 def test_check_vectors_skips_mdc(caplog):
     """Test that state vector checks are skipped for MDC events."""
     caplog.set_level(logging.INFO)
@@ -145,13 +206,13 @@ def test_check_vectors(mock_create_label, mock_remove_label, mock_upload,
                        mock_json, llhoft_glob_pass, ifo_h1, ifo_h1_idq):
     event = {'search': 'AllSky', 'instruments': 'H1', 'pipeline': 'oLIB'}
     superevent_id = 'S12345a'
-    start, end = 1216577977, 1216577979
+    start, end = 1216577978, 1216577978.1
     detchar.check_vectors(event, superevent_id, start, end)
     calls = [
         call(
             None, None, 'S12345a',
             ('Detector state for active instruments is good.\n{}'
-             'Check looked within -0.5/+0.5 seconds of superevent. ').format(
+             'Check looked within -1.5/+1.5 seconds of superevent. ').format(
                  detchar.generate_table(
                      'Data quality bits',
                      ['H1:NO_OMC_DCPD_ADC_OVERFLOW',
@@ -161,14 +222,14 @@ def test_check_vectors(mock_create_label, mock_remove_label, mock_upload,
         call(
             None, None, 'S12345a',
             ('No HW injections found. '
-             'Check looked within -0.5/+0.5 seconds of superevent. '),
+             'Check looked within -1.5/+1.5 seconds of superevent. '),
             ['data_quality']),
         call(
             None, None, 'S12345a',
             ('iDQ glitch probabilities at both H1 and L1'
              ' are good (below {} threshold). '
              'Maximum p(glitch) is "H1:IDQ-PGLITCH_OVL_32_2048": 0.0. '
-             'Check looked within -0.5/+0.5 seconds of superevent. ').format(
+             'Check looked within -1.5/+1.5 seconds of superevent. ').format(
                  app.conf['idq_pglitch_thresh']),
             ['data_quality']),
         call(

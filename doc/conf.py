@@ -103,16 +103,19 @@ todo_include_todos = False
 
 autodoc_mock_imports = []
 for mod in ['astropy',
+            'astropy_healpix',
             'click',
             'comet',
             'flask',
             'flask_caching',
             'gcn',
             'glue',
+            'gracedb_sdk',
             'gwdatafind',
             'gwpy',
             'healpy',
             'h5py',
+            'imapclient',
             'lal',
             'lalapps',
             'lalburst',
@@ -264,8 +267,10 @@ intersphinx_mapping = {
     'comet': ('https://comet.readthedocs.io/en/stable/', None),
     'data-quality-report': (
         'https://docs.ligo.org/detchar/data-quality-report/', None),
+    'htcondor': ('https://htcondor.readthedocs.io/en/stable/', None),
     'gwpy': ('https://gwpy.github.io/docs/stable/', None),
-    'ligo.skymap': ('https://leo-singer.docs.ligo.org/ligo.skymap/', None),
+    'ligo.skymap': ('https://lscsoft.docs.ligo.org/ligo.skymap/', None),
+    'requests': ('https://requests.readthedocs.io/en/master/', None),
     'twisted': ('https://twistedmatrix.com/documents/current/api/', None),
     'userguide': ('https://emfollow.docs.ligo.org/userguide/', None)
 }
@@ -275,7 +280,7 @@ intersphinx_mapping = {
 
 # celery.contrib.sphinx does not show source links for tasks if this is set
 # to the default value of True
-viewcode_import = False
+viewcode_follow_imported_members = False
 
 
 # -- Options for graphviz extension ---------------------------------------

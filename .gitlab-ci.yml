@@ -3,6 +3,8 @@ include:
     file: lint.yml
   - project: emfollow/gitlab-ci-templates
     file: sccb.yml
+  - project: emfollow/gitlab-ci-templates
+    file: ssh.yml
 
 variables:
   # Allow Celery to run as root, because everything runs as root under Docker.
@@ -27,7 +29,7 @@ stages:
 
 # Build source distribution
 sdist:
-  image: python:3.6-slim
+  image: python:3.7-slim
   stage: dist
   variables:
     GIT_STRATEGY: fetch
@@ -44,7 +46,7 @@ sdist:
 
 # Build binary distribution
 bdist:
-  image: python:3.6-slim
+  image: python:3.7-slim
   stage: test
   <<: *in-tmpdir
   script:
@@ -77,8 +79,6 @@ bdist:
   only:
     changes:
       - requirements.txt
-dependencies/python3.6:
-  <<: *dependencies
 dependencies/python3.7:
   <<: *dependencies
 
@@ -90,7 +90,7 @@ dependencies/python3.7:
   script:
     - apt-get update -qq && apt-get install -y -qq redis-server
     - tar --strip-components 1 -xf ${CI_PROJECT_DIR}/*.tar.*
-    - pip install pytest-cov -r test-requirements.txt
+    - pip install pytest-cov
     - python setup.py test --addopts="-vv --cov --cov-report=html:${CI_PROJECT_DIR}/htmlcov --cov-report=term --junit-xml=${CI_PROJECT_DIR}/junit.xml"
   dependencies:
     - sdist
@@ -99,15 +99,12 @@ dependencies/python3.7:
       - htmlcov/
     reports:
       junit: junit.xml
-test/python3.6:
-  image: $CI_REGISTRY_IMAGE/dependencies/python3.6:$CI_COMMIT_REF_NAME
-  <<: *test
 test/python3.7:
   image: $CI_REGISTRY_IMAGE/dependencies/python3.7:$CI_COMMIT_REF_NAME
   <<: *test
 
 lint:
-  image: $CI_REGISTRY_IMAGE/dependencies/python3.6:$CI_COMMIT_REF_NAME
+  image: $CI_REGISTRY_IMAGE/dependencies/python3.7:$CI_COMMIT_REF_NAME
   stage: test
   variables:
     GIT_STRATEGY: fetch
@@ -127,24 +124,6 @@ associate commits in Sentry:
     name: getsentry/sentry-cli
     entrypoint: [""]
   script:
-    # FIXME: Override git remote settings.
-    # Remove this once git.ligo.org has Sentry initegraton turned on.
-    - |
-      cat <<EOF > .git/config
-      [core]
-        repositoryformatversion = 0
-        filemode = true
-        bare = false
-        logallrefupdates = true
-        ignorecase = true
-        precomposeunicode = true
-      [remote "origin"]
-        url = https://github.com/lpsinger/gwcelery
-        fetch = +refs/heads/*:refs/remotes/origin/*
-      [branch "master"]
-        remote = origin
-        merge = refs/heads/master
-      EOF
     - SENTRY_VERSION=$(echo *.tar.* | sed 's/\.tar\..*//')
     - sentry-cli releases new ${SENTRY_VERSION}
     - sentry-cli releases set-commits --auto ${SENTRY_VERSION}
@@ -170,19 +149,18 @@ associate commits in Sentry:
     - if [ "${CI_COMMIT_TAG:0:1}" = "v" ]; then docker tag $IMAGE_TAG ${IMAGE_TAG%:*}:latest; docker push ${IMAGE_TAG%:*}:latest; fi
   dependencies:
     - bdist
-docker/python3.6:
-  <<: *docker
 docker/python3.7:
   <<: *docker
 
 # Generate documentation
 doc:
-  image: python:3.6-slim
+  image: python:3.7-slim
   stage: test
   <<: *in-tmpdir
   script:
     - apt-get update -qq && apt-get install -y -qq graphviz
     - tar --strip-components 1 -xf ${CI_PROJECT_DIR}/*.tar.*
+    - pip install -r docs-requirements.txt
     - python setup.py build_sphinx
   dependencies:
     - sdist
@@ -203,12 +181,12 @@ pages:
   only:
     - master
   dependencies:
-    - test/python3.6
+    - test/python3.7
 
 # Upload package to PyPI
 pypi:
   stage: deploy
-  image: python:3.6-slim
+  image: python:3.7-slim
   script:
     - pip install twine
     - twine upload *.tar.* *.whl
@@ -263,33 +241,12 @@ release:
       fi
 
 .deploy-common: &deploy-common
+  extends: .ssh
   stage: deploy
-  image:
-    name: ligo/ssh
-    entrypoint: [""]
   only:
-    - master@emfollow/gwcelery
+    - branches@emfollow/gwcelery
     - tags@emfollow/gwcelery
   dependencies: []
-  before_script:
-    - umask 0077
-    # Set up LSC DataGrid credentials
-    - echo "${ROBOT_KEYTAB}" | base64 -d > keytab
-    - kinit emfollow-deployment/robot/runners.ligo.uwm.edu@LIGO.ORG -k -t keytab
-    - ligo-proxy-init -k -p
-    - grid-proxy-info -identity
-    # Figure out which user to log in as (emfollow or emfollow-playground)
-    - mkdir -p ~/.ssh
-    - |
-      cat > ~/.ssh/config <<EOF
-      Host emfollow-playground.*
-      User emfollow-playground
-      Host emfollow.*
-      User emfollow
-      EOF
-    - REMOTE_HOST=${CI_ENVIRONMENT_URL##*//}
-    - REMOTE_HOST=${REMOTE_HOST%%/*}
-    - echo $REMOTE_HOST
 
 # Continuous deployment.
 # Note that all deployments except playground/CIT are manual.
@@ -302,8 +259,7 @@ release:
       gsissh -T $REMOTE_HOST bash <<EOF
       set -e
       if [ ! -d .git ]; then git init; fi
-      git fetch ${CI_REPOSITORY_URL}
-      git fetch --tags ${CI_REPOSITORY_URL}
+      git fetch --tags ${CI_REPOSITORY_URL} $CI_COMMIT_SHA
       git checkout -f $CI_COMMIT_SHA
       EOF
     # Reinstall and start (new session to reload bashrc).
@@ -311,12 +267,12 @@ release:
       gsissh -T $REMOTE_HOST bash <<EOF
       . .bashrc
       set -e
-      pip3.6 install --upgrade pipenv pip setuptools
+      python -m pip install --upgrade pipenv pip setuptools
       pipenv install --system --deploy
       # FIXME: remove pip uninstall temporary directories left behind due to
       # bug with pip on NFS. See https://github.com/pypa/pip/issues/6327
-      chmod -R ug+rwx .local/lib/python3.6/site-packages/~* || true
-      rm -rf .local/lib/python3.6/site-packages/~* || true
+      chmod -R ug+rwx .local/lib/python3.7/site-packages/~* || true
+      rm -rf .local/lib/python3.7/site-packages/~* || true
       gwcelery condor resubmit
       EOF
 
@@ -336,6 +292,8 @@ deploy to production at CIT:
     name: production/CIT
     on_stop: stop deployment on production at CIT
     url: https://emfollow.ligo.caltech.edu/flower
+  variables:
+    REMOTE_HOST: emfollow.ligo.caltech.edu
 
 deploy to production at LHO:
   <<: *deploy-start
@@ -344,6 +302,8 @@ deploy to production at LHO:
     name: production/LHO
     on_stop: stop deployment on production at LHO
     url: https://emfollow.ligo-wa.caltech.edu/flower
+  variables:
+    REMOTE_HOST: emfollow.ligo-wa.caltech.edu
 
 deploy to playground at CIT:
   <<: *deploy-start
@@ -351,6 +311,8 @@ deploy to playground at CIT:
     name: playground/CIT
     on_stop: stop deployment on playground at CIT
     url: https://emfollow-playground.ligo.caltech.edu/flower
+  variables:
+    REMOTE_HOST: emfollow-playground.ligo.caltech.edu
 
 deploy to playground at LHO:
   <<: *deploy-start
@@ -359,6 +321,28 @@ deploy to playground at LHO:
     name: playground/LHO
     on_stop: stop deployment on playground at LHO
     url: https://emfollow-playground.ligo-wa.caltech.edu/flower
+  variables:
+    REMOTE_HOST: emfollow-playground.ligo-wa.caltech.edu
+
+deploy to test at CIT:
+  <<: *deploy-start
+  when: manual
+  environment:
+    name: test/CIT
+    on_stop: stop deployment on test at CIT
+    url: https://emfollow-test.ligo.caltech.edu/flower
+  variables:
+    REMOTE_HOST: emfollow-test.ligo.caltech.edu
+
+deploy to test at LHO:
+  <<: *deploy-start
+  when: manual
+  environment:
+    name: test/LHO
+    on_stop: stop deployment on test at LHO
+    url: https://emfollow-test.ligo-wa.caltech.edu/flower
+  variables:
+    REMOTE_HOST: emfollow-test.ligo-wa.caltech.edu
 
 stop deployment on production at CIT:
   <<: *deploy-stop
@@ -386,4 +370,18 @@ stop deployment on playground at LHO:
   when: manual
   environment:
     name: playground/LHO
+    action: stop
+
+stop deployment on test at CIT:
+  <<: *deploy-stop
+  when: manual
+  environment:
+    name: test/CIT
+    action: stop
+
+stop deployment on test at LHO:
+  <<: *deploy-stop
+  when: manual
+  environment:
+    name: test/LHO
     action: stop

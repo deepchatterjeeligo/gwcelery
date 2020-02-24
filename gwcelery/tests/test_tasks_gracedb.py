@@ -1,192 +1,162 @@
-from unittest.mock import patch
+from collections import defaultdict
+from unittest import mock
 from pkg_resources import resource_string
-
-from ligo.gracedb import rest
 
 from ..tasks import gracedb
 
 
-def test_create_event(monkeypatch):
+class DictMock(mock.MagicMock):
 
-    class MockResponse(object):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._defaultdict = defaultdict(self.__class__)
 
-        def json(self):
-            return {'graceid': 'T12345'}
-
-    class MockGraceDb(object):
-
-        def createEvent(self, group, pipeline, filename,  # noqa: N802
-                        search=None, labels=None, offline=False,
-                        filecontents=None, **kwargs):
-            assert group == 'group'
-            assert pipeline == 'pipeline'
-            assert filename == 'initial.data'
-            assert search == 'search'
-            assert filecontents == 'filecontents'
-            return MockResponse()
-
-    monkeypatch.setattr('gwcelery.tasks.gracedb.client', MockGraceDb())
-
-    graceid = gracedb.create_event('filecontents', 'search', 'pipeline',
-                                   'group')
-    assert graceid == 'T12345'
+    def __getitem__(self, key):  # noqa: D105
+        return self._defaultdict[key]
 
 
-@patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
+def patch(*args, **kwargs):
+    return mock.patch(*args, **kwargs, new_callable=DictMock)
+
+
+@patch('gwcelery.tasks.gracedb.client')
+def test_create_event(mock_gracedb):
+    graceid = gracedb.create_event(
+        'filecontents', 'search', 'pipeline', 'group')
+    mock_gracedb.events.create.assert_called_once_with(
+        filename='initial.data', filecontents='filecontents', search='search',
+        pipeline='pipeline', group='group', labels=())
+    assert graceid == mock_gracedb.events.create.return_value['graceid']
+
+
+@patch('gwcelery.tasks.gracedb.client')
+def test_create_superevent(mock_gracedb):
+    superevent_id = gracedb.create_superevent(
+        'graceid', 't_0', 't_start', 't_end')
+    mock_gracedb.superevents.create.assert_called_once_with(
+        preferred_event='graceid', t_0='t_0', t_start='t_start', t_end='t_end')
+    assert superevent_id == mock_gracedb.superevents.create.return_value[
+        'superevent_id']
+
+
+@patch('gwcelery.tasks.gracedb.client')
 def test_create_label(mock_gracedb):
-    # Run function under test.
     gracedb.create_label('label', 'graceid')
+    mock_gracedb.events['graceid'].labels.create.assert_called_once_with(
+        'label')
 
-    # Check that one file was downloaded.
-    mock_gracedb.writeLabel.assert_called_once_with('graceid', 'label')
 
-
-@patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
+@patch('gwcelery.tasks.gracedb.client')
 def test_remove_label(mock_gracedb):
-    # Run function under test.
     gracedb.remove_label('label', 'graceid')
+    mock_gracedb.events['graceid'].labels.delete.assert_called_once_with(
+        'label')
 
-    # Check that one file was downloaded.
-    mock_gracedb.removeLabel.assert_called_once_with('graceid', 'label')
 
-
-@patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
+@patch('gwcelery.tasks.gracedb.client')
 def test_create_signoff(mock_gracedb):
     """Create a label in GraceDB."""
     gracedb.create_signoff('status', 'comment', 'signoff_type', 'graceid')
-    mock_gracedb.create_signoff.assert_called_once_with(
-        'graceid', 'signoff_type', 'status', 'comment')
+    mock_gracedb.superevents['graceid'].signoff.assert_called_once_with(
+        'signoff_type', 'status', 'comment')
 
 
-@patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
+@patch('gwcelery.tasks.gracedb.client')
 @patch('gwcelery.tasks.gracedb.get_log',
        return_value=[{'filename': filename, 'N': i} for i, filename in
                      enumerate(['foo', 'bat', 'bat', 'baz'])])
 def test_create_tag(mock_get_log, mock_gracedb):
     gracedb.create_tag('bat', 'tag', 'graceid')
     mock_get_log.assert_called_once_with('graceid')
-    mock_gracedb.addTag.assert_called_once_with('graceid', 2, 'tag')
+    mock_gracedb.events['graceid'].logs[
+        2].tags.create.assert_called_once_with('tag')
 
 
-@patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
+@patch('gwcelery.tasks.gracedb.client')
 def test_create_voevent(mock_gracedb):
-    # Run function under test.
     gracedb.create_voevent('graceid', 'voevent_type',
                            skymap_filename='skymap_filename',
                            skymap_type='skymap_type')
-
-    # Check that one file was downloaded.
-    mock_gracedb.createVOEvent.assert_called_once_with(
-        'graceid', 'voevent_type',
+    mock_gracedb.events['graceid'].voevents.create.assert_called_once_with(
+        voevent_type='voevent_type',
         skymap_filename='skymap_filename',
         skymap_type='skymap_type')
 
 
-@patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
+@patch('gwcelery.tasks.gracedb.client')
 def test_download(mock_gracedb):
-    # Run function under test.
     gracedb.download('filename', 'graceid')
-
-    # Check that one file was downloaded.
-    mock_gracedb.files.assert_called_once_with('graceid', 'filename', raw=True)
+    mock_gracedb.events['graceid'].files['filename'].get.assert_called_once()
 
 
-@patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
+@patch('gwcelery.tasks.gracedb.client')
 def test_expose(mock_gracedb):
     gracedb.expose('graceid')
-    mock_gracedb.modify_permissions.assert_called_once_with(
-        'graceid', 'expose')
+    mock_gracedb.superevents['graceid'].expose.assert_called_once_with()
 
 
-def test_get_log(monkeypatch):
-
-    class logs(object):  # noqa: N801
-
-        def json(self):
-            return {'log': 'stuff'}
-
-    class MockGraceDb(object):
-
-        def logs(self, graceid):
-            assert graceid == 'graceid'
-            return logs()
-
-    monkeypatch.setattr('gwcelery.tasks.gracedb.client', MockGraceDb())
-
-    # Run function under test.
+@patch('gwcelery.tasks.gracedb.client')
+def test_get_log(mock_gracedb):
     ret = gracedb.get_log('graceid')
+    mock_gracedb.events['graceid'].logs.get.assert_called_once_with()
+    assert ret == mock_gracedb.events['graceid'].logs.get.return_value
 
-    assert ret == 'stuff'
 
-
-@patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
+@patch('gwcelery.tasks.gracedb.client')
 def test_get_superevent(mock_gracedb):
-    # Run function under test.
     gracedb.get_superevent('graceid')
-
-    # Check that one file was downloaded.
-    mock_gracedb.superevent.assert_called_once_with('graceid')
+    mock_gracedb.superevents['graceid'].get.assert_called_once_with()
 
 
-@patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
+@patch('gwcelery.tasks.gracedb.client')
 def test_get_superevents(mock_gracedb):
     gracedb.get_superevents('query')
-    mock_gracedb.superevents.assert_called_once_with('query')
+    mock_gracedb.superevents.search.assert_called_once_with(query='query')
 
 
-@patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
+@patch('gwcelery.tasks.gracedb.client')
 def test_upload(mock_gracedb):
-    # Run function under test.
     gracedb.upload('filecontents', 'filename', 'graceid', 'message', 'tags')
+    mock_gracedb.events['graceid'].logs.create.assert_called_once_with(
+        comment='message', filename='filename', filecontents='filecontents',
+        tags='tags')
 
-    # Check that one file was uploaded.
-    mock_gracedb.writeLog.assert_called_once_with(
-        'graceid', 'message', 'filename', 'filecontents', 'tags')
 
-
-@patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
+@patch('gwcelery.tasks.gracedb.client')
 def test_get_event(mock_gracedb):
     gracedb.get_event('G123456')
-    mock_gracedb.event.assert_called_once_with('G123456')
+    mock_gracedb.events['G123456'].get.assert_called_once_with()
 
 
-@patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
+@patch('gwcelery.tasks.gracedb.client')
+def test_get_group(mock_gracedb):
+    result = gracedb.get_group('G123456')
+    mock_gracedb.events['G123456'].get.assert_called_once_with()
+    assert result == mock_gracedb.events['G123456'].get.return_value['group']
+
+
+@patch('gwcelery.tasks.gracedb.client')
 def test_get_search(mock_gracedb):
-    gracedb.get_search('G123456')
-    mock_gracedb.event.assert_called_once_with('G123456')
+    result = gracedb.get_search('G123456')
+    mock_gracedb.events['G123456'].get.assert_called_once_with()
+    assert result == mock_gracedb.events['G123456'].get.return_value['search']
 
 
-@patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
+@patch('gwcelery.tasks.gracedb.client')
 def test_get_events(mock_gracedb):
-    gracedb.get_events(query='Some query', orderby=None,
-                       count=None, columns=None)
-    mock_gracedb.events.assert_called_once_with(query='Some query',
-                                                orderby=None, count=None,
-                                                columns=None)
+    gracedb.get_events(query='Some query')
+    mock_gracedb.events.search.assert_called_once_with(query='Some query')
 
 
-def test_get_labels(monkeypatch):
-
-    class MockResponse(object):
-
-        def json(self):
-            return {'labels': [{'name': 'LABEL1'}, {'name': 'LABEL2'}]}
-
-    class MockGraceDb(object):
-
-        def labels(self, graceid):
-            assert graceid == 'S1234'
-            return MockResponse()
-
-    monkeypatch.setattr('gwcelery.tasks.gracedb.client', MockGraceDb())
-    labels = gracedb.get_labels('S1234')
-    assert labels == {'LABEL1', 'LABEL2'}
+@patch('gwcelery.tasks.gracedb.client')
+def test_get_labels(mock_gracedb):
+    gracedb.get_labels('S1234')
+    mock_gracedb.events['S1234'].labels.get.assert_called_once()
 
 
-@patch('gwcelery.tasks.gracedb.client', autospec=rest.GraceDb)
+@patch('gwcelery.tasks.gracedb.client')
 def test_replace_event(mock_gracedb):
     text = resource_string(__name__, 'data/fermi_grb_gcn.xml')
     gracedb.replace_event(graceid='G123456', payload=text)
-    mock_gracedb.replaceEvent.assert_called_once_with(graceid='G123456',
-                                                      filename='initial.data',
-                                                      filecontents=text)
+    mock_gracedb.events.update.assert_called_once_with('G123456',
+                                                       filecontents=text)

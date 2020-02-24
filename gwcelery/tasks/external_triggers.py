@@ -1,16 +1,34 @@
 from lxml import etree
 from urllib.parse import urlparse
+from celery import group
 from celery.utils.log import get_logger
 
-from . import circulars
 from . import detchar
 from . import gcn
 from . import gracedb
-from . import ligo_fermi_skymaps
+from . import external_skymaps
 from . import lvalert
 from . import raven
 
 log = get_logger(__name__)
+
+
+REQUIRED_LABELS_BY_TASK = {
+    'compare': {'SKYMAP_READY', 'EXT_SKYMAP_READY', 'EM_COINC'},
+    'combine': {'SKYMAP_READY', 'EXT_SKYMAP_READY', 'RAVEN_ALERT'}
+}
+"""These labels should be present on an external event to consider it to
+be ready for sky map comparison.
+"""
+
+FERMI_GRB_CLASS_VALUE = 4
+"""This is the index that denote GRBs within Fermi's Flight Position
+classification."""
+
+FERMI_GRB_CLASS_THRESH = .5
+"""This values denotes the threshold of the most likely Fermi source
+classification, above which we will consider a Fermi Flight Position
+notice."""
 
 
 @gcn.handler(gcn.NoticeType.SNEWS,
@@ -18,7 +36,9 @@ log = get_logger(__name__)
              shared=False)
 def handle_snews_gcn(payload):
     """Handles the payload from SNEWS alerts.
-    Prepares the alert to be sent to graceDB as 'E' events."""
+
+    Prepares the alert to be sent to graceDB as 'E' events.
+    """
     root = etree.fromstring(payload)
 
     #  Get TrigID and Test Event Boolean
@@ -55,18 +75,22 @@ def handle_snews_gcn(payload):
     detchar.check_vectors(event, event['graceid'], start, end)
 
 
-@gcn.handler(gcn.NoticeType.FERMI_GBM_ALERT,
-             gcn.NoticeType.FERMI_GBM_FLT_POS,
+@gcn.handler(gcn.NoticeType.FERMI_GBM_FLT_POS,
              gcn.NoticeType.FERMI_GBM_GND_POS,
              gcn.NoticeType.FERMI_GBM_FIN_POS,
-             gcn.NoticeType.SWIFT_BAT_GRB_ALERT,
-             gcn.NoticeType.SWIFT_BAT_GRB_LC,
+             gcn.NoticeType.SWIFT_BAT_GRB_POS_ACK,
              gcn.NoticeType.FERMI_GBM_SUBTHRESH,
+             gcn.NoticeType.INTEGRAL_WAKEUP,
+             gcn.NoticeType.INTEGRAL_REFINED,
+             gcn.NoticeType.INTEGRAL_OFFLINE,
+             gcn.NoticeType.AGILE_MCAL_ALERT,
              queue='exttrig',
              shared=False)
 def handle_grb_gcn(payload):
     """Handles the payload from Fermi and Swift alerts.
-    Prepares the alert to be sent to graceDB as 'E' events."""
+
+    Prepares the alert to be sent to graceDB as 'E' events.
+    """
     root = etree.fromstring(payload)
     u = urlparse(root.attrib['ivorn'])
     stream_path = u.path
@@ -78,12 +102,33 @@ def handle_grb_gcn(payload):
         trig_id = root.find("./What/Param[@name='Trans_Num']").attrib['value']
 
     stream_obsv_dict = {'/SWIFT': 'Swift',
-                        '/Fermi': 'Fermi'}
+                        '/Fermi': 'Fermi',
+                        '/INTEGRAL': 'INTEGRAL',
+                        '/AGILE': 'AGILE'}
     event_observatory = stream_obsv_dict[stream_path]
 
     reliability = root.find("./What/Param[@name='Reliability']")
     if reliability is not None and int(reliability.attrib['value']) <= 4:
         return
+
+    #  Check if Fermi trigger is likely noise by checking classification
+    #  Most_Likely_Index of 4 is an astrophysical GRB
+    #  If not at least 50% chance of GRB we will not consider it for RAVEN
+    likely_source = root.find("./What/Param[@name='Most_Likely_Index']")
+    likely_prob = root.find("./What/Param[@name='Most_Likely_Prob']")
+    if likely_source is not None and \
+        (likely_source.attrib['value'] != FERMI_GRB_CLASS_VALUE
+         or likely_prob.attrib['value'] < FERMI_GRB_CLASS_THRESH):
+        labels = ['NOT_GRB']
+    else:
+        labels = None
+
+    #  Check if Swift has lost lock. If so then veto
+    lost_lock = \
+        root.find("./What/Group[@name='Solution_Status']" +
+                  "/Param[@name='StarTrack_Lost_Lock']")
+    if lost_lock is not None and lost_lock.attrib['value']:
+        labels = ['NOT_GRB']
 
     ivorn = root.attrib['ivorn']
     if 'subthresh' in ivorn.lower():
@@ -100,23 +145,39 @@ def handle_grb_gcn(payload):
         event, = events
         graceid = event['graceid']
         gracedb.replace_event(graceid, payload)
+        if labels:
+            gracedb.create_label(labels[0], graceid)
+        else:
+            gracedb.remove_label('NOT_GRB', graceid)
+        event = gracedb.get_event(graceid)
 
     else:
         graceid = gracedb.create_event(filecontents=payload,
                                        search=search,
                                        group='External',
-                                       pipeline=event_observatory)
+                                       pipeline=event_observatory,
+                                       labels=labels)
         event = gracedb.get_event(graceid)
         start = event['gpstime']
         end = start + event['extra_attributes']['GRB']['trigger_duration']
         detchar.check_vectors(event, event['graceid'], start, end)
 
+    if search == 'GRB':
+        notice_type = \
+            int(root.find("./What/Param[@name='Packet_Type']").attrib['value'])
+        notice_date = root.find("./Who/Date").text
+        external_skymaps.create_upload_external_skymap(
+            event, notice_type, notice_date)
+    if event['pipeline'] == 'Fermi':
+        external_skymaps.get_upload_external_skymap.s(graceid).delay()
+
 
 @lvalert.handler('superevent',
                  'mdc_superevent',
                  'external_fermi',
-                 'external_grb',
                  'external_swift',
+                 'external_integral',
+                 'external_agile',
                  shared=False)
 def handle_grb_lvalert(alert):
     """Parse an LVAlert message related to superevents/GRB external triggers
@@ -124,40 +185,71 @@ def handle_grb_lvalert(alert):
 
     Notes
     -----
-
     This LVAlert message handler is triggered by creating a new superevent or
     GRB external trigger event, or applying the ``EM_COINC`` label to any
     superevent:
 
     * Any new event triggers a coincidence search with
       :meth:`gwcelery.tasks.raven.coincidence_search`.
-    * The ``EM_COINC`` label triggers the creation of a combined GW-GRB sky map
-      using :meth:`gwcelery.tasks.ligo_fermi_skymaps.create_combined_skymap`.
+    * When both a GW and GRB sky map are available during a coincidence,
+      indicated by the labels ``SKYMAP_READY`` and ``EXT_SKYMAP_READY``
+      respectfully, this trigger the spacetime coinc FAR to be calculated. If
+      an alert is triggered with these same conditions, indicated by the
+      ``RAVEN_ALERT`` label, a combined GW-GRB sky map is created using
+      :meth:`gwcelery.tasks.external_skymaps.create_combined_skymap`.
+
     """
     # Determine GraceDB ID
     graceid = alert['uid']
 
     if alert['alert_type'] == 'new' and \
-            alert['object'].get('group', '') == 'External':
+            alert['object'].get('group') == 'External':
         raven.coincidence_search(graceid, alert['object'], group='CBC')
+        raven.coincidence_search(graceid, alert['object'], group='Burst')
+    elif alert['alert_type'] == 'new' and 'S' in graceid:
+        preferred_event_id = alert['object']['preferred_event']
+        gw_group = gracedb.get_group(preferred_event_id)
         raven.coincidence_search(graceid, alert['object'],
-                                 group='Burst')
-    elif graceid.startswith('S'):
-        preferred_event_id = gracedb.get_superevent(graceid)['preferred_event']
-        group = gracedb.get_event(preferred_event_id)['group']
-        if alert['alert_type'] == 'new':
-            raven.coincidence_search(graceid, alert['object'],
-                                     group=group,
-                                     pipelines=['Fermi', 'Swift'])
-        elif alert['alert_type'] == 'label_added' and \
-                alert['data']['name'] == 'EM_COINC':
-            ligo_fermi_skymaps.create_combined_skymap(graceid).delay()
+                                 group=gw_group,
+                                 pipelines=['Fermi', 'Swift'])
+    elif alert['alert_type'] == 'label_added' and \
+            alert['object'].get('group') == 'External':
+        if _skymaps_are_ready(alert['object'], alert['data']['name'],
+                              'compare'):
+            #  if both sky maps present and a coincidence, compare sky maps
+            se_id, ext_ids = _get_superevent_ext_ids(graceid, alert['object'],
+                                                     'compare')
+            superevent = gracedb.get_superevent(se_id)
+            preferred_event_id = superevent['preferred_event']
+            gw_group = gracedb.get_group(preferred_event_id)
+            raven.raven_pipeline([alert['object']], se_id, superevent,
+                                 gw_group)
+        if _skymaps_are_ready(alert['object'], alert['data']['name'],
+                              'combine'):
+            #  if both sky maps present and a raven alert, create combined
+            #  skymap
+            se_id, ext_id = _get_superevent_ext_ids(graceid, alert['object'],
+                                                    'combine')
+            external_skymaps.create_combined_skymap(se_id, ext_id)
+        elif 'EM_COINC' in alert['object']['labels']:
+            #  if not complete, check if GW sky map; apply label to external
+            #  event if GW sky map
+            se_labels = gracedb.get_labels(alert['object']['superevent'])
+            if 'SKYMAP_READY' in se_labels:
+                gracedb.create_label.si('SKYMAP_READY', graceid).delay()
+    elif alert['alert_type'] == 'label_added' and 'S' in graceid and \
+            'SKYMAP_READY' in alert['object']['labels']:
+        #  if sky map in superevent, apply label to all external events
+        #  at the time
+        group(
+            gracedb.create_label.si('SKYMAP_READY', ext_id)
+            for ext_id in alert['object']['em_events']
+        ).delay()
 
 
 @lvalert.handler('superevent',
                  'mdc_superevent',
                  'external_snews',
-                 'external_snews_supernova',
                  shared=False)
 def handle_snews_lvalert(alert):
     """Parse an LVAlert message related to superevents/SN external triggers and
@@ -165,13 +257,13 @@ def handle_snews_lvalert(alert):
 
     Notes
     -----
-
     This LVAlert message handler is triggered by creating a new superevent or
     SN external trigger event, or applying the ``EM_COINC`` label to any
     superevent:
 
     * Any new event triggers a coincidence search with
       :meth:`gwcelery.tasks.raven.coincidence_search`.
+
     """
     # Determine GraceDB ID
     graceid = alert['uid']
@@ -179,10 +271,10 @@ def handle_snews_lvalert(alert):
     if alert['object'].get('group', '') == 'Test':
         pass
     elif alert['alert_type'] == 'new' and \
-            alert['object'].get('group', '') == 'External':
+            alert['object'].get('group') == 'External':
         raven.coincidence_search(graceid, alert['object'],
                                  group='Burst', pipelines=['SNEWS'])
-    elif graceid.startswith('S'):
+    elif 'S' in graceid:
         preferred_event_id = gracedb.get_superevent(graceid)['preferred_event']
         group = gracedb.get_event(preferred_event_id)['group']
         if alert['alert_type'] == 'new' and group == 'Burst':
@@ -190,34 +282,25 @@ def handle_snews_lvalert(alert):
                                      group=group, pipelines=['SNEWS'])
 
 
-@lvalert.handler('superevent',
-                 shared=False)
-def handle_emcoinc_lvalert(alert):
-    """Parse an LVAlert message related to 'coincidence_far.json' file upload
-    and then upload circular. We need a separate handler to prevent doubles
-    from occurring by adding the task to both the handle_snews_lvalert and
-    handle_grb_lvalert handlers.
+def _skymaps_are_ready(event, label, task):
+    label_set = set(event['labels'])
+    required_labels = REQUIRED_LABELS_BY_TASK[task]
+    return required_labels.issubset(label_set) and label in required_labels
 
-    Notes
-    -----
 
-    This LVAlert message handler is triggered by uploading
-    ``'coincidence_far.json'`` file to any superevent:
-
-    * Any 'coincidence_far.json' file upload triggers
-      :meth:`gwcelery.tasks.circulars.create_emcoinc_circular`.
-    """
-    # Determine GraceDB ID
-    graceid = alert['uid']
-    if alert['alert_type'] == 'log' and alert['data']['filename'] == \
-       'coincidence_far.json':
-        (
-            circulars.create_emcoinc_circular.si(graceid)
-            |
-            gracedb.upload.s(
-                'emcoinc-circular.txt',
-                graceid,
-                'Template for the em_coinc GCN Circular',
-                tags=['em_follow', 'ext_coinc']
-            )
-        ).delay()
+def _get_superevent_ext_ids(graceid, event, task):
+    if task == 'combine':
+        if 'S' in graceid:
+            se_id = event['superevent_id']
+            ext_id = event['em_type']
+        else:
+            se_id = event['superevent']
+            ext_id = event['graceid']
+    elif task == 'compare':
+        if 'S' in graceid:
+            se_id = event['superevent_id']
+            ext_id = event['em_events']
+        else:
+            se_id = event['superevent']
+            ext_id = [event['graceid']]
+    return se_id, ext_id
