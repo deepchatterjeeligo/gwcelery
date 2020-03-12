@@ -13,6 +13,9 @@ Changelog
 
 -   Enable receipt confirmation of early warning GCN notices.
 
+-   Update to sleek-lvalert 2.0.0, which switches the XMPP client from the
+    unmaintained SleekXMPP project to the currently maintained fork Slixmpp.
+
 0.12.1 (2020-03-12)
 -------------------
 
