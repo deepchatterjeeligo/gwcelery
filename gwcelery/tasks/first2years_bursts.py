@@ -3,7 +3,7 @@ import random
 import json
 import pkg_resources
 import fileinput
-import os
+import tempfile
 
 from celery.task import PeriodicTask
 from celery.utils.log import get_task_logger
@@ -21,7 +21,7 @@ def pick_bursts():
 
     # sample detectors with ball park duty cyle ~ .7
     detectors = random.sample(['L1', 'H1', 'V1', 'K1'],
-                              binomial(4, .7))
+                              max(2, binomial(4, .7)))
     # get current gps time
     gps_now = Time.now().gps
 
@@ -45,26 +45,18 @@ def pick_bursts():
     cwb_file = pkg_resources.resource_filename(
           __name__, "../data/first2years_bursts/trigger_test.txt")
 
-    # create temporary file for updated cwb event
-    os.system('touch cwbtemp.txt')
-
-    with open('cwbtemp.txt', 'w+') as tmp:
-        # loop over static cwb file
-        for line in fileinput.input(cwb_file):
-            # replace 'time' line with correct current gps time
-            if line.startswith('time:'):
-                new_time_str = f'time:       {gps_now} {gps_now}'
-                tmp.write(new_time_str)
-            else:
-                tmp.write(line)
-        fileinput.input(cwb_file).close()
-
-    # read in updated cwb data
-    with open('cwbtemp.txt') as cwb_txt:
-        cwb_data = cwb_txt.read()
-
-    # remove temp file
-    os.system('rm cwbtemp.txt')
+    # create temporary file 
+    with tempfile.TemporaryFile("w+t") as f:
+    # loop over static cwb file
+    for line in fileinput.input(cwb_file):
+        # replace 'time' line with correct current gps time
+        if line.startswith('time:'):
+            new_time_str = f'time:       {gps_now} {gps_now}'
+            f.write(new_time_str)
+        else:
+            f.write(line)
+    f.seek(0)
+    cwb_data = f.read()
 
     # get static cwb skymap
     cwb_skymap_path = "../data/first2years_bursts/" \
