@@ -21,7 +21,13 @@ def pick_bursts():
 
     # sample detectors with ball park duty cyle ~ .7
     detectors = random.sample(['L1', 'H1', 'V1', 'K1'],
-                              max(2, binomial(4, .7)))
+                              binomial(4, .7))
+    
+    # make sure there are 2 detectors online 
+    while(len(detectors) < 2):
+        detectors = random.sample(['L1', 'H1', 'V1', 'K1'],
+                              binomial(4, .7))
+    
     # get current gps time
     gps_now = Time.now().gps
 
