@@ -2,7 +2,6 @@
 import random
 import json
 import pkg_resources
-import fileinput
 import tempfile
 
 from celery.task import PeriodicTask
@@ -28,6 +27,8 @@ def pick_bursts():
     while(len(detectors) < 2):
         detectors = random.sample(['L1', 'H1', 'V1', 'K1'],
                                   binomial(4, .7))
+    # get current gps time
+    gps_now = Time.now()
 
     # get static olib data file
     olib_json = resource_json(
@@ -49,9 +50,6 @@ def pick_bursts():
     
     with open(cwb_file) as tmp:
         cwb_lines = tmp.readlines()
-
-    # get current gps time
-    gps_now = Time.now()
 
     # static time delta for start and stop times
     time_delta = .05
