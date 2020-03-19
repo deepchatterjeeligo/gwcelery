@@ -29,9 +29,6 @@ def pick_bursts():
         detectors = random.sample(['L1', 'H1', 'V1', 'K1'],
                                   binomial(4, .7))
 
-    # get current gps time
-    gps_now = Time.now().gps
-
     # get static olib data file
     olib_json = resource_json(
                 __name__, '../data/first2years_bursts/olib_data.json')
@@ -48,18 +45,31 @@ def pick_bursts():
 
     # get static cwb data file
     cwb_file = pkg_resources.resource_filename(
-          __name__, "../data/first2years_bursts/trigger_test.txt")
+            __name__, "../data/first2years_bursts/trigger_test.txt")
+    
+    with open(cwb_file) as tmp:
+        cwb_lines = tmp.readlines()
 
-    # create temporary file
+    # get current gps time
+    gps_now = Time.now()
+
+    # static time delta for start and stop times
+    time_delta = .05
+    start = gps_now - time_delta
+    stop = gps_now + time_delta
+
+    # update cwb txt file with new strings
+    new_time_str = f'time:       {gps_now} {gps_now}\n'
+    new_start_str = f'start:      {start} {start}\n'
+    new_stop_str = f'stop:       {stop} {stop}\n'
+
+    cwb_lines[48] = new_start_str
+    cwb_lines[49] = new_time_str
+    cwb_lines[50] = new_stop_str
+
+    # write to temp file and read out
     with tempfile.TemporaryFile("w+t") as f:
-        # loop over static cwb file
-        for line in fileinput.input(cwb_file):
-            # replace 'time', 'start', 'stop', lines
-            if line.startswith('time:'):
-                new_time_str = f'time:       {gps_now} {gps_now}'
-                f.write(new_time_str)
-            else:
-                f.write(line)
+        f.writelines(cwb_lines)
         f.seek(0)
         cwb_data = f.read()
 
