@@ -33,16 +33,14 @@ def pick_bursts():
     gps_now = Time.now().gps
 
     # get static olib data file
-    olib_file = resource_json(
+    olib_json = resource_json(
                 __name__, '../data/first2years_bursts/olib_data.json')
 
-    with open(olib_file) as olib_json:
-        # change file to reflect which instruments detected,
-        # as well update gpstime
-        olib_data = json.load(olib_json)
-        olib_data['instruments'] = ",".join(detectors)
-        olib_data['gpstime'] = gps_now
-        olib_data = json.dumps(olib_data)
+    # change file to reflect which instruments detected,
+    # as well update gpstime
+    olib_json['instruments'] = ",".join(detectors)
+    olib_json['gpstime'] = gps_now
+    olib_json = json.dumps(olib_json)
 
     # get static olib skymap
     olib_skymap_path = "../data/first2years_bursts/" \
