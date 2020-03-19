@@ -10,6 +10,7 @@ from celery.utils.log import get_task_logger
 from astropy.time import Time
 from numpy.random import binomial
 
+from ..util import resource_json
 from ..import app
 from . import gracedb
 
@@ -32,8 +33,8 @@ def pick_bursts():
     gps_now = Time.now().gps
 
     # get static olib data file
-    olib_file = pkg_resources.resource_filename(
-        __name__, '../data/first2years_bursts/olib_data.json')
+    olib_file = resource_json(
+                __name__, '../data/first2years_bursts/olib_data.json')
 
     with open(olib_file) as olib_json:
         # change file to reflect which instruments detected,
