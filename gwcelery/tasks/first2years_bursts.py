@@ -40,7 +40,7 @@ def pick_bursts():
     # as well update gpstime
     olib_json['instruments'] = ",".join(detectors)
     olib_json['gpstime'] = gps_now
-    olib_json = json.dumps(olib_json)
+    olib_data = json.dumps(olib_json)
 
     # get static olib skymap
     olib_skymap_path = "../data/first2years_bursts/" \
@@ -54,7 +54,7 @@ def pick_bursts():
     with tempfile.TemporaryFile("w+t") as f:
         # loop over static cwb file
         for line in fileinput.input(cwb_file):
-            # replace 'time' line with correct current gps time
+            # replace 'time', 'start', 'stop', lines
             if line.startswith('time:'):
                 new_time_str = f'time:       {gps_now} {gps_now}'
                 f.write(new_time_str)
