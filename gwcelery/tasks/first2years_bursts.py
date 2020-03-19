@@ -28,7 +28,7 @@ def pick_bursts():
         detectors = random.sample(['L1', 'H1', 'V1', 'K1'],
                                   binomial(4, .7))
     # get current gps time
-    gps_now = Time.now()
+    gps_now = Time.now().gps
 
     # get static olib data file
     olib_json = resource_json(
@@ -47,7 +47,7 @@ def pick_bursts():
     # get static cwb data file
     cwb_file = pkg_resources.resource_filename(
             __name__, "../data/first2years_bursts/trigger_test.txt")
-    
+
     with open(cwb_file) as tmp:
         cwb_lines = tmp.readlines()
 
