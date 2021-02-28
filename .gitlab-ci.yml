@@ -83,6 +83,8 @@ dependencies/python3.7:
   <<: *dependencies
 dependencies/python3.8:
   <<: *dependencies
+dependencies/python3.9:
+  <<: *dependencies
 
 # Run unit tests and coverage measurement
 .test: &test
@@ -106,6 +108,9 @@ test/python3.7:
   <<: *test
 test/python3.8:
   image: $CI_REGISTRY_IMAGE/dependencies/python3.8:$CI_COMMIT_REF_SLUG
+  <<: *test
+test/python3.9:
+  image: $CI_REGISTRY_IMAGE/dependencies/python3.9:$CI_COMMIT_REF_SLUG
   <<: *test
 
 lint:
@@ -159,6 +164,8 @@ associate commits in Sentry:
 docker/python3.7:
   <<: *docker
 docker/python3.8:
+  <<: *docker
+docker/python3.9:
   <<: *docker
 
 # Generate documentation
