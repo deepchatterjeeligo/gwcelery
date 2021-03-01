@@ -153,6 +153,7 @@ def make_omegascan(ifo, t0, durs):
 
     outfile = io.BytesIO()
     fig.savefig(outfile, format='png', dpi=300)
+    plt.close(fig)
     return outfile.getvalue()
 
 
