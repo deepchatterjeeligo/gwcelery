@@ -1,0 +1,65 @@
+{# Template of ini file for BayesWave follow-up. This is a jinja template. The
+explanation on jinja is here http://jinja.pocoo.org . #}
+
+[input]
+dataseed=1234
+
+; variable srate (use min-srate for trigger<frequency-threshold; max-srate for
+; trigger>frequency-threshold)
+frequency-threshold=200
+min_srate=4096
+max_srate=4096
+max-seglen=2
+min-seglen=2
+;if no trigger frequency is found, this value is used:
+flow=16.0
+; threshold for setting flow (and srate, window length and seglen):
+frequency_threshold = 200.0
+; if trigger_frequency < 200.0: flow = min_flow
+min_flow=16.0
+; else: flow = max_flow
+max_flow = 64.0
+
+PSDlength=64.0
+padding=0.0
+ifo-list={{ifos|safe}}
+
+[engine]
+bayeswave=/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/bin/BayesWave
+bayeswave_post=/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/bin/BayesWavePost
+megaplot=/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/bin/megaplot.py
+megasky=/cvmfs/ligo-containers.opensciencegrid.org/lscsoft/conda/latest/envs/ligo-py27/bin/megasky.py
+
+[datafind]
+frtype-list={{frames|safe}}
+channel-list={{channels|safe}}
+url-type=file
+veto-categories=[1]
+
+[bayeswave_options]
+bayesLine=
+updateGeocenterPSD=
+waveletPrior=
+Dmax=100
+#quick runs for gwcelery testing -- TODO: REMOVE THIS FOR PRODUCTION
+Niter=500
+
+[bayeswave_post_options]
+0noise=
+bayesLine=
+
+[condor]
+universe=vanilla
+checkpoint=
+bayeswave-request-memory=300
+bayeswave_post-request-memory=2000
+datafind=/usr/bin/gw_data_find
+ligolw_print=/usr/bin/ligolw_print
+segfind=/usr/bin/ligolw_segment_query_dqsegdb
+accounting_group = ligo.prod.o3.burst.paramest.bayeswave
+
+[segfind]
+segment-url=https://segments.ligo.org
+
+[segments]
+{{analyzelist}}
