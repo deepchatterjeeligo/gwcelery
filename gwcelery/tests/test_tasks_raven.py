@@ -38,8 +38,6 @@ def test_coincidence_search(mock_calculate_coincidence_far,
 
 @pytest.mark.parametrize(
     'event_type,event_id', [['SE', 'S1234'], ['ExtTrig', 'E1234']])
-@patch('ligo.raven.gracedb_events.ExtTrig')
-@patch('ligo.raven.gracedb_events.SE')
 @patch('ligo.raven.search.search')
 def test_raven_search(mock_raven_search, mock_se_cls, mock_exttrig_cls,
                       event_type, event_id):
@@ -53,10 +51,12 @@ def test_raven_search(mock_raven_search, mock_se_cls, mock_exttrig_cls,
     if event_id == 'S1234':
         mock_raven_search.assert_called_once_with(
             mock_se_cls(event_id, gracedb=gracedb.client), -5, 5,
+            event_dict=alert_object,
             gracedb=gracedb.client, group=None, pipelines=[], searches=[])
     elif event_id == 'E1234':
         mock_raven_search.assert_called_once_with(
             mock_exttrig_cls(event_id, gracedb=gracedb.client), -5, 5,
+            event_dict=alert_object,
             gracedb=gracedb.client, group=None, pipelines=[], searches=[])
     else:
         raise ValueError
@@ -79,6 +79,7 @@ def test_calculate_coincidence_far(
     raven.calculate_coincidence_far(se, ext, tl, th)
     mock_calc_signif.assert_called_once_with(
         'S1234', 'E4321', tl, th,
+        se_dict=se, ext_dict=ext,
         incl_sky=False, grb_search='GRB',
         gracedb=gracedb.client, far_grb=None)
 
@@ -95,6 +96,7 @@ def test_calculate_coincidence_far_subgrb(mock_calc_signif):
     raven.calculate_coincidence_far(se, ext, tl, th)
     mock_calc_signif.assert_called_once_with(
         'S1234', 'E4321', tl, th,
+        se_dict=se, ext_dict=ext,
         incl_sky=False, grb_search='GRB',
         gracedb=gracedb.client, far_grb=1e5)
 
@@ -119,6 +121,7 @@ def test_calculate_spacetime_coincidence_far(
     mock_calc_signif.assert_called_once_with(
         'S1234', 'E4321', tl, th,
         incl_sky=True, grb_search='GRB',
+        se_dict=se, ext_dict=ext,
         se_fitsfile='fermi_skymap.fits.gz',
         ext_fitsfile='fermi_skymap.fits.gz',
         gracedb=gracedb.client, far_grb=None)
